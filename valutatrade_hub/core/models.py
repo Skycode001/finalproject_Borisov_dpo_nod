@@ -1,7 +1,7 @@
 import hashlib
 from datetime import datetime
-import json
 from typing import Optional
+
 
 class User:
     """Класс, представляющий пользователя системы."""
@@ -109,3 +109,120 @@ class User:
         user._salt = data["salt"]
         user._registration_date = datetime.fromisoformat(data["registration_date"])
         return user
+
+
+class Wallet:
+    """Класс, представляющий кошелёк для хранения баланса в конкретной валюте."""
+
+    def __init__(self, currency_code: str, balance: float = 0.0):
+        """
+        Инициализация кошелька.
+
+        Args:
+            currency_code: Код валюты (например, "USD", "BTC").
+            balance: Начальный баланс. По умолчанию 0.0.
+        """
+        self.currency_code = currency_code
+        self.balance = balance  # Используем сеттер для проверки
+
+    # ===== Геттер и сеттер для balance =====
+    @property
+    def balance(self) -> float:
+        """Возвращает текущий баланс кошелька."""
+        return self._balance
+
+    @balance.setter
+    def balance(self, value: float):
+        """
+        Устанавливает баланс кошелька.
+
+        Args:
+            value: Новое значение баланса.
+
+        Raises:
+            ValueError: Если значение отрицательное или некорректного типа.
+        """
+        # Проверка типа
+        if not isinstance(value, (int, float)):
+            raise ValueError("Баланс должен быть числом (int или float).")
+
+        # Проверка на отрицательное значение
+        if value < 0:
+            raise ValueError("Баланс не может быть отрицательным.")
+
+        # Приведение к float для единообразия
+        self._balance = float(value)
+
+    # ===== Публичные методы =====
+    def deposit(self, amount: float) -> None:
+        """
+        Пополняет баланс кошелька.
+
+        Args:
+            amount: Сумма для пополнения.
+
+        Raises:
+            ValueError: Если сумма некорректна (не число или отрицательная).
+        """
+        # Проверка типа и положительности
+        if not isinstance(amount, (int, float)):
+            raise ValueError("Сумма пополнения должна быть числом.")
+
+        if amount <= 0:
+            raise ValueError("Сумма пополнения должна быть положительным числом.")
+
+        # Обновляем баланс через сеттер
+        self.balance = self._balance + amount
+
+    def withdraw(self, amount: float) -> bool:
+        """
+        Снимает средства с кошелька.
+
+        Args:
+            amount: Сумма для снятия.
+
+        Returns:
+            bool: True если снятие успешно, False если недостаточно средств.
+
+        Raises:
+            ValueError: Если сумма некорректна (не число или отрицательная).
+        """
+        # Проверка типа и положительности
+        if not isinstance(amount, (int, float)):
+            raise ValueError("Сумма снятия должна быть числом.")
+
+        if amount <= 0:
+            raise ValueError("Сумма снятия должна быть положительным числом.")
+
+        # Проверка достаточности средств
+        if amount > self._balance:
+            return False
+
+        # Обновляем баланс через сеттер
+        self.balance = self._balance - amount
+        return True
+
+    def get_balance_info(self) -> dict:
+        """
+        Возвращает информацию о балансе кошелька.
+
+        Returns:
+            dict: Словарь с информацией о кошельке.
+        """
+        return {
+            "currency_code": self.currency_code,
+            "balance": self._balance
+        }
+
+    # ===== Методы для работы с JSON =====
+    def to_dict(self) -> dict:
+        """Сериализует объект кошелька в словарь для сохранения в JSON."""
+        return self.get_balance_info()
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Wallet':
+        """Создает объект Wallet из словаря (при загрузке из JSON)."""
+        return cls(
+            currency_code=data["currency_code"],
+            balance=data["balance"]
+        )
