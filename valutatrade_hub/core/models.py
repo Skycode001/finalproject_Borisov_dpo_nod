@@ -226,3 +226,135 @@ class Wallet:
             currency_code=data["currency_code"],
             balance=data["balance"]
         )
+
+class Portfolio:
+    """Класс, представляющий портфель всех кошельков одного пользователя."""
+
+    def __init__(self, user_id: int, wallets: dict[str, Wallet] = None):
+        """
+        Инициализация портфеля пользователя.
+
+        Args:
+            user_id: Уникальный идентификатор пользователя.
+            wallets: Словарь кошельков. Если None, создается пустой словарь.
+        """
+        self._user_id = user_id
+        self._wallets = wallets if wallets is not None else {}
+
+    # ===== Геттеры =====
+    @property
+    def user_id(self) -> int:
+        """Возвращает ID пользователя."""
+        return self._user_id
+
+    @property
+    def wallets(self) -> dict[str, Wallet]:
+        """Возвращает копию словаря кошельков."""
+        return self._wallets.copy()
+
+    # ===== Публичные методы =====
+    def add_currency(self, currency_code: str) -> Wallet:
+        """
+        Добавляет новый кошелёк в портфель.
+
+        Args:
+            currency_code: Код валюты для нового кошелька.
+
+        Returns:
+            Wallet: Созданный объект кошелька.
+
+        Raises:
+            ValueError: Если кошелёк с таким кодом валюты уже существует.
+        """
+        # Проверка уникальности кода валюты
+        if currency_code in self._wallets:
+            raise ValueError(f"Кошелёк с валютой '{currency_code}' уже существует в портфеле.")
+
+        # Создание нового кошелька и добавление в словарь
+        new_wallet = Wallet(currency_code, 0.0)
+        self._wallets[currency_code] = new_wallet
+        return new_wallet
+
+    def get_wallet(self, currency_code: str) -> Wallet:
+        """
+        Возвращает объект Wallet по коду валюты.
+
+        Args:
+            currency_code: Код валюты.
+
+        Returns:
+            Wallet: Объект кошелька.
+
+        Raises:
+            ValueError: Если кошелёк с таким кодом валюты не найден.
+        """
+        if currency_code not in self._wallets:
+            raise ValueError(f"Кошелёк с валютой '{currency_code}' не найден в портфеле.")
+        return self._wallets[currency_code]
+
+    def get_total_value(self, base_currency: str = 'USD') -> float:
+        """
+        Рассчитывает общую стоимость всех валют в портфеле в базовой валюте.
+
+        Args:
+            base_currency: Код базовой валюты для расчета стоимости.
+
+        Returns:
+            float: Общая стоимость портфеля в базовой валюте.
+        """
+        # Фиксированные курсы для упрощения (как указано в задании)
+        exchange_rates = {
+            'USD': {'USD': 1.0, 'EUR': 0.92, 'BTC': 0.000025, 'RUB': 95.0},
+            'EUR': {'USD': 1.08, 'EUR': 1.0, 'BTC': 0.000027, 'RUB': 102.0},
+            'BTC': {'USD': 40000.0, 'EUR': 37000.0, 'BTC': 1.0, 'RUB': 3800000.0},
+            'RUB': {'USD': 0.0105, 'EUR': 0.0098, 'BTC': 0.00000026, 'RUB': 1.0}
+        }
+
+        total_value = 0.0
+
+        # Если базовая валюта не в словаре курсов, используем USD как основную
+        if base_currency not in exchange_rates:
+            base_currency = 'USD'
+
+        for currency_code, wallet in self._wallets.items():
+            if currency_code in exchange_rates and base_currency in exchange_rates[currency_code]:
+                # Конвертируем баланс кошелька в базовую валюту
+                rate = exchange_rates[currency_code][base_currency]
+                total_value += wallet.balance * rate
+            elif currency_code == base_currency:
+                # Если валюта кошелька совпадает с базовой
+                total_value += wallet.balance
+            else:
+                # Если нет курса для валюты, считаем через USD как промежуточную
+                if currency_code in exchange_rates and 'USD' in exchange_rates[currency_code]:
+                    to_usd = wallet.balance * exchange_rates[currency_code]['USD']
+                    if base_currency in exchange_rates['USD']:
+                        total_value += to_usd * exchange_rates['USD'][base_currency]
+                    else:
+                        total_value += to_usd
+
+        return round(total_value, 2)
+
+    # ===== Методы для работы с JSON =====
+    def to_dict(self) -> dict:
+        """Сериализует объект портфеля в словарь для сохранения в JSON."""
+        wallets_dict = {}
+        for currency_code, wallet in self._wallets.items():
+            wallets_dict[currency_code] = wallet.to_dict()
+
+        return {
+            "user_id": self._user_id,
+            "wallets": wallets_dict
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Portfolio':
+        """Создает объект Portfolio из словаря (при загрузке из JSON)."""
+        wallets = {}
+        for currency_code, wallet_data in data["wallets"].items():
+            wallets[currency_code] = Wallet.from_dict(wallet_data)
+
+        return cls(
+            user_id=data["user_id"],
+            wallets=wallets
+        )
