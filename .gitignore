@@ -1,0 +1,49 @@
+# Virtual environment
+env/
+venv/
+.venv
+.env
+.vscode/
+
+*.sqlite3
+
+# Poetry
+poetry.lock
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Database metadata - local user data
+db_meta.json
+
+# Файлы окружения
+.env
+
+# Записи asciinema
+*.cast
+
+data/*.json
+!data/.gitkeep
+poetry.lock
+.idea/

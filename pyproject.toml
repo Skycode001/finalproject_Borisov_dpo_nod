@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "valutatrade-hub"
+version = "0.1.0"
+description = "Комплексная платформа для управления виртуальным портфелем валют"
+authors = ["BorisovV"]
+readme = "README.md"
+packages = [{include = "valutatrade_hub"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0"
+ruff = "^0.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+]
+ignore = ["E501"]  # Игнорировать длину строки, так как ruff format сам позаботится
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
