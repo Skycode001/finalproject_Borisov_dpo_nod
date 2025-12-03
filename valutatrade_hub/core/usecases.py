@@ -205,7 +205,7 @@ class PortfolioManager:
 
         validated_amount = InputValidator.validate_amount(str(amount))
         if validated_amount is None:
-            return False, "Сумма должна быть положительным числом"
+            return False, "'amount' должен быть положительным числом"
 
         currency_code = currency_code.upper()
         amount = validated_amount
@@ -219,7 +219,7 @@ class PortfolioManager:
         service = CurrencyService()
         rate = service.get_exchange_rate(currency_code, 'USD')
         if not rate:
-            return False, f"Курс для {currency_code} не найден"
+            return False, f"Не удалось получить курс для {currency_code}→USD"
 
         # Рассчитываем стоимость в USD
         cost_usd = amount * rate
@@ -250,8 +250,7 @@ class PortfolioManager:
 
             # Сохраняем изменения
             if self._save_portfolios():
-                return True, (f"Успешно куплено {amount:.4f} {currency_code} "
-                              f"за ${cost_usd:.2f} по курсу {rate:.6f}")
+                return True, f"Успешно куплено {amount:.4f} {currency_code}"
             else:
                 return False, "Ошибка при сохранении данных"
 

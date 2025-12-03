@@ -182,28 +182,86 @@ class TradingCLI(cmd.Cmd):
     def do_buy(self, arg: str) -> None:
         """
         Купить валюту.
-        Использование: buy <currency_code> <amount>
-        Пример: buy BTC 0.5
+        Использование: buy --currency <currency_code> --amount <amount>
+        Пример: buy --currency BTC --amount 0.05
         """
+        # Проверка авторизации
         if not self.user_manager.is_logged_in:
             print("❌ Ошибка: требуется авторизация. Используйте команду login")
             return
 
         args = shlex.split(arg)
-        if len(args) != 2:
-            print("Использование: buy <currency_code> <amount>")
-            print("Пример: buy BTC 0.5")
+
+        # Парсим аргументы
+        currency_code = None
+        amount = None
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--currency" and i + 1 < len(args):
+                currency_code = args[i + 1].upper()
+                i += 2
+            elif args[i] == "--amount" and i + 1 < len(args):
+                try:
+                    amount = float(args[i + 1])
+                    i += 2
+                except ValueError:
+                    print("❌ Ошибка: 'amount' должен быть положительным числом")
+                    return
+            else:
+                print("❌ Ошибка: неверный формат команды")
+                print("Использование: buy --currency <currency_code> --amount <amount>")
+                print("Пример: buy --currency BTC --amount 0.05")
+                return
+
+        # Проверяем обязательные аргументы
+        if not currency_code or amount is None:
+            print("❌ Ошибка: требуются оба аргумента --currency и --amount")
+            print("Использование: buy --currency <currency_code> --amount <amount>")
+            print("Пример: buy --currency BTC --amount 0.05")
             return
 
-        currency_code, amount_str = args
-        amount = InputValidator.validate_amount(amount_str)
-
-        if amount is None:
-            print("❌ Ошибка: сумма должна быть положительным числом")
+        # Валидация валюты
+        if not InputValidator.validate_currency_code(currency_code):
+            print("❌ Ошибка: некорректный код валюты")
             return
 
+        # Валидация суммы
+        if amount <= 0:
+            print("❌ Ошибка: 'amount' должен быть положительным числом")
+            return
+
+        # Получаем текущий курс
+        service = CurrencyService()
+        rate = service.get_exchange_rate(currency_code, 'USD')
+
+        if not rate:
+            print(f"❌ Ошибка: не удалось получить курс для {currency_code}→USD")
+            return
+
+        # Рассчитываем стоимость покупки
+        cost_usd = amount * rate
+
+        # Получаем текущий баланс до покупки
+        current_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+        if current_balance is None:
+            current_balance = 0.0
+
+        # Выполняем покупку
         success, message = self.portfolio_manager.buy_currency(currency_code, amount)
-        print(f"{'✅' if success else '❌'} {message}")
+
+        if success:
+            # Получаем новый баланс после покупки
+            new_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+            if new_balance is None:
+                new_balance = current_balance + amount
+
+            print(f"✅ Покупка выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}")
+            print("   Изменения в портфеле:")
+            print(f"   - {currency_code}: было {current_balance:.4f} → стало {new_balance:.4f}")
+            print(f"   Оценочная стоимость покупки: {cost_usd:,.2f} USD")
+        else:
+            print(f"❌ {message}")
 
     def do_sell(self, arg: str) -> None:
         """
