@@ -266,28 +266,94 @@ class TradingCLI(cmd.Cmd):
     def do_sell(self, arg: str) -> None:
         """
         Продать валюту.
-        Использование: sell <currency_code> <amount>
-        Пример: sell BTC 0.1
+        Использование: sell --currency <currency_code> --amount <amount>
+        Пример: sell --currency BTC --amount 0.01
         """
+        # Проверка авторизации
         if not self.user_manager.is_logged_in:
             print("❌ Ошибка: требуется авторизация. Используйте команду login")
             return
 
         args = shlex.split(arg)
-        if len(args) != 2:
-            print("Использование: sell <currency_code> <amount>")
-            print("Пример: sell BTC 0.1")
+
+        # Парсим аргументы
+        currency_code = None
+        amount = None
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--currency" and i + 1 < len(args):
+                currency_code = args[i + 1].upper()
+                i += 2
+            elif args[i] == "--amount" and i + 1 < len(args):
+                try:
+                    amount = float(args[i + 1])
+                    i += 2
+                except ValueError:
+                    print("❌ Ошибка: 'amount' должен быть положительным числом")
+                    return
+            else:
+                print("❌ Ошибка: неверный формат команды")
+                print("Использование: sell --currency <currency_code> --amount <amount>")
+                print("Пример: sell --currency BTC --amount 0.01")
+                return
+
+        # Проверяем обязательные аргументы
+        if not currency_code or amount is None:
+            print("❌ Ошибка: требуются оба аргумента --currency и --amount")
+            print("Использование: sell --currency <currency_code> --amount <amount>")
+            print("Пример: sell --currency BTC --amount 0.01")
             return
 
-        currency_code, amount_str = args
-        amount = InputValidator.validate_amount(amount_str)
-
-        if amount is None:
-            print("❌ Ошибка: сумма должна быть положительным числом")
+        # Валидация валюты
+        if not InputValidator.validate_currency_code(currency_code):
+            print("❌ Ошибка: некорректный код валюты")
             return
 
+        # Валидация суммы
+        if amount <= 0:
+            print("❌ Ошибка: 'amount' должен быть положительным числом")
+            return
+
+        # Получаем текущий баланс до продажи
+        current_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+
+        # Проверяем существование кошелька
+        if current_balance is None:
+            print(f"❌ Ошибка: у вас нет кошелька '{currency_code}'. Добавьте валюту: она создаётся автоматически при первой покупке.")
+            return
+
+        # Проверяем достаточность средств
+        if current_balance < amount:
+            print(f"❌ Ошибка: недостаточно средств: доступно {current_balance:.4f} {currency_code}, требуется {amount:.4f} {currency_code}")
+            return
+
+        # Получаем текущий курс
+        service = CurrencyService()
+        rate = service.get_exchange_rate(currency_code, 'USD')
+
+        if not rate:
+            print(f"❌ Ошибка: не удалось получить курс для {currency_code}→USD")
+            return
+
+        # Рассчитываем выручку от продажи
+        revenue_usd = amount * rate
+
+        # Выполняем продажу
         success, message = self.portfolio_manager.sell_currency(currency_code, amount)
-        print(f"{'✅' if success else '❌'} {message}")
+
+        if success:
+            # Получаем новый баланс после продажи
+            new_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+            if new_balance is None:
+                new_balance = 0.0
+
+            print(f"✅ Продажа выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}")
+            print("   Изменения в портфеле:")
+            print(f"   - {currency_code}: было {current_balance:.4f} → стало {new_balance:.4f}")
+            print(f"   Оценочная выручка: {revenue_usd:,.2f} USD")
+        else:
+            print(f"❌ {message}")
 
     def do_get_rate(self, arg: str) -> None:
         """
@@ -380,8 +446,8 @@ class TradingCLI(cmd.Cmd):
                 ("logout", "Выход из системы", "logout"),
                 ("showportfolio", "Показать портфель", "showportfolio"),
                 ("showportfolio --base EUR", "Портфель в EUR", "showportfolio --base EUR"),
-                ("buy", "Купить валюту", "buy BTC 0.5"),
-                ("sell", "Продать валюту", "sell BTC 0.1"),
+                ("buy", "Купить валюту", "buy --currency BTC --amount 0.05"),
+                ("sell", "Продать валюту", "sell --currency BTC --amount 0.01"),
                 ("get-rate", "Получить курс валюты", "get-rate EUR USD"),
                 ("whoami", "Инфо о текущем пользователе", "whoami"),
                 ("exit/quit", "Выход из приложения", "exit"),

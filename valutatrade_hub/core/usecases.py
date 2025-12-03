@@ -278,7 +278,7 @@ class PortfolioManager:
 
         validated_amount = InputValidator.validate_amount(str(amount))
         if validated_amount is None:
-            return False, "Сумма должна быть положительным числом"
+            return False, "'amount' должен быть положительным числом"
 
         currency_code = currency_code.upper()
         amount = validated_amount
@@ -290,18 +290,25 @@ class PortfolioManager:
 
         # Проверяем наличие кошелька
         if currency_code not in portfolio.wallets:
-            return False, f"У вас нет валюты {currency_code}"
+            return False, f"У вас нет кошелька '{currency_code}'. Добавьте валюту: она создаётся автоматически при первой покупке."
 
         # Получаем курс
         service = CurrencyService()
         rate = service.get_exchange_rate(currency_code, 'USD')
         if not rate:
-            return False, f"Курс для {currency_code} не найден"
+            return False, f"Не удалось получить курс для {currency_code}→USD"
 
         # Рассчитываем выручку в USD
         revenue_usd = amount * rate
 
         try:
+            # Получаем текущий баланс
+            current_balance = portfolio.get_wallet(currency_code).balance
+
+            # Проверяем достаточно ли валюты для продажи
+            if current_balance < amount:
+                return False, f"Недостаточно средств: доступно {current_balance:.4f} {currency_code}, требуется {amount:.4f} {currency_code}"
+
             # Проверяем/создаем USD кошелек (для зачисления)
             if 'USD' not in portfolio.wallets:
                 portfolio.add_currency('USD')
@@ -309,11 +316,6 @@ class PortfolioManager:
             # Получаем кошельки
             source_wallet = portfolio.get_wallet(currency_code)
             usd_wallet = portfolio.get_wallet('USD')
-
-            # Проверяем достаточно ли валюты для продажи
-            if source_wallet.balance < amount:
-                return False, (f"Недостаточно {currency_code} для продажи. "
-                               f"Нужно: {amount:.4f}, доступно: {source_wallet.balance:.4f}")
 
             # Выполняем транзакцию
             if not source_wallet.withdraw(amount):
@@ -323,8 +325,7 @@ class PortfolioManager:
 
             # Сохраняем изменения
             if self._save_portfolios():
-                return True, (f"Успешно продано {amount:.4f} {currency_code} "
-                              f"за ${revenue_usd:.2f} по курсу {rate:.6f}")
+                return True, f"Успешно продано {amount:.4f} {currency_code}"
             else:
                 return False, "Ошибка при сохранении данных"
 
