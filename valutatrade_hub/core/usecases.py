@@ -93,12 +93,12 @@ class UserManager:
         user = next((u for u in self._users if u.username == username), None)
 
         if not user:
-            return False, "Пользователь не найден"
+            return False, f"Пользователь '{username}' не найден"
 
         # Проверка пароля
         if user.verify_password(password):
             self._current_user = user
-            return True, f"Добро пожаловать, {username}!"
+            return True, f"Вы вошли как '{username}'"
         else:
             return False, "Неверный пароль"
 

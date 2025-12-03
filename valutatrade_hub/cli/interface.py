@@ -98,7 +98,7 @@ class TradingCLI(cmd.Cmd):
         success, message = self.user_manager.login(username, password)
 
         if success:
-            print(f"✅ {message}")
+            print(f"✅ Вы вошли как '{username}'")
             self.prompt = f"{username}> "
         else:
             print(f"❌ {message}")
