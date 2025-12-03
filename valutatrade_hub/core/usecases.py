@@ -50,23 +50,31 @@ class UserManager:
             return False, "Имя пользователя должно содержать 3-20 буквенно-цифровых символов"
 
         if not InputValidator.validate_password(password):
-            return False, "Пароль должен содержать минимум 4 символа"
+            return False, "Пароль должен быть не короче 4 символов"
 
         # Проверка уникальности
         if any(user.username == username for user in self._users):
-            return False, "Пользователь с таким именем уже существует"
+            return False, f"Имя пользователя '{username}' уже занято"
 
         try:
             # Создание нового пользователя
             user_id = max((user.user_id for user in self._users if user.user_id), default=0) + 1
             new_user = User(username=username, password=password, user_id=user_id)
 
-            # Добавление и сохранение
+            # Добавление и сохранение пользователя
             self._users.append(new_user)
-            if self._save_users():
-                return True, f"Пользователь '{username}' успешно зарегистрирован"
-            else:
-                return False, "Ошибка при сохранении данных"
+            if not self._save_users():
+                return False, "Ошибка при сохранении данных пользователя"
+
+            # Создаем пустой портфель для нового пользователя
+            portfolio_manager = PortfolioManager(self)
+            if not portfolio_manager.create_portfolio_for_user(user_id):
+                # Откатываем создание пользователя, если не удалось создать портфель
+                self._users.remove(new_user)
+                self._save_users()
+                return False, "Ошибка при создании портфеля"
+
+            return True, f"Пользователь '{username}' зарегистрирован (id={user_id}). Войдите: login --username {username} --password ****"
         except ValueError as e:
             return False, str(e)
 
@@ -139,6 +147,23 @@ class PortfolioManager:
         portfolios_data = [portfolio.to_dict() for portfolio in self._portfolios.values()]
         return DataManager.save_json(PORTFOLIOS_FILE, portfolios_data)
 
+    def create_portfolio_for_user(self, user_id: int) -> bool:
+        """
+        Создает пустой портфель для пользователя.
+
+        Args:
+            user_id: ID пользователя.
+
+        Returns:
+            bool: True если успешно создан, False в противном случае.
+        """
+        if user_id in self._portfolios:
+            return True  # Портфель уже существует
+
+        portfolio = Portfolio(user_id)
+        self._portfolios[user_id] = portfolio
+        return self._save_portfolios()
+
     def get_current_portfolio(self) -> Optional[Portfolio]:
         """
         Возвращает портфель текущего пользователя.
@@ -151,7 +176,7 @@ class PortfolioManager:
 
         user_id = self._user_manager.current_user.user_id
 
-        # Если портфеля нет - создаем
+        # Если портфеля нет - создаем (для уже существующих пользователей)
         if user_id not in self._portfolios:
             portfolio = Portfolio(user_id)
             self._portfolios[user_id] = portfolio
