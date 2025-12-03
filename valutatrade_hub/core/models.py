@@ -302,30 +302,36 @@ class Portfolio:
         Returns:
             float: Общая стоимость портфеля в базовой валюте.
         """
-        # Фиксированные курсы для упрощения (как указано в задании)
+        # Фиксированные курсы для упрощения
         exchange_rates = {
-            'USD': {'USD': 1.0, 'EUR': 0.92, 'BTC': 0.000025, 'RUB': 95.0},
-            'EUR': {'USD': 1.08, 'EUR': 1.0, 'BTC': 0.000027, 'RUB': 102.0},
-            'BTC': {'USD': 40000.0, 'EUR': 37000.0, 'BTC': 1.0, 'RUB': 3800000.0},
-            'RUB': {'USD': 0.0105, 'EUR': 0.0098, 'BTC': 0.00000026, 'RUB': 1.0}
+            'USD': {'USD': 1.0, 'EUR': 0.92, 'BTC': 0.000025, 'RUB': 95.0, 'ETH': 0.00027},
+            'EUR': {'USD': 1.08, 'EUR': 1.0, 'BTC': 0.000027, 'RUB': 102.0, 'ETH': 0.00029},
+            'BTC': {'USD': 40000.0, 'EUR': 37000.0, 'BTC': 1.0, 'RUB': 3800000.0, 'ETH': 10.5},
+            'RUB': {'USD': 0.0105, 'EUR': 0.0098, 'BTC': 0.00000026, 'RUB': 1.0, 'ETH': 0.0000028},
+            'ETH': {'USD': 3720.0, 'EUR': 3400.0, 'BTC': 0.093, 'RUB': 350000.0, 'ETH': 1.0}
         }
 
-        total_value = 0.0
+        # Приводим к верхнему регистру
+        base_currency = base_currency.upper()
 
-        # Если базовая валюта не в словаре курсов, используем USD как основную
+        # Если базовая валюта не поддерживается, используем USD
         if base_currency not in exchange_rates:
             base_currency = 'USD'
 
+        total_value = 0.0
+
         for currency_code, wallet in self._wallets.items():
+            currency_code = currency_code.upper()
+
             if currency_code in exchange_rates and base_currency in exchange_rates[currency_code]:
-                # Конвертируем баланс кошелька в базовую валюту
+                # Конвертируем напрямую
                 rate = exchange_rates[currency_code][base_currency]
                 total_value += wallet.balance * rate
             elif currency_code == base_currency:
-                # Если валюта кошелька совпадает с базовой
+                # Та же валюта
                 total_value += wallet.balance
             else:
-                # Если нет курса для валюты, считаем через USD как промежуточную
+                # Пытаемся конвертировать через USD как промежуточную
                 if currency_code in exchange_rates and 'USD' in exchange_rates[currency_code]:
                     to_usd = wallet.balance * exchange_rates[currency_code]['USD']
                     if base_currency in exchange_rates['USD']:

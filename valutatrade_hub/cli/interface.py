@@ -4,7 +4,7 @@ import shlex
 from prettytable import PrettyTable
 
 from ..core.usecases import PortfolioManager, RateManager, UserManager
-from ..core.utils import InputValidator
+from ..core.utils import CurrencyService, InputValidator
 
 
 class TradingCLI(cmd.Cmd):
@@ -103,25 +103,76 @@ class TradingCLI(cmd.Cmd):
         else:
             print(f"❌ {message}")
 
-    def do_show_portfolio(self, _: str) -> None:
+    def do_show_portfolio(self, arg: str) -> None:
         """
         Показать портфель текущего пользователя.
-        Использование: show-portfolio
+        Использование: show-portfolio [--base <currency_code>]
+        Пример: show-portfolio
+        Пример: show-portfolio --base EUR
         """
+        # Парсим аргументы
+        base_currency = 'USD'  # значение по умолчанию
+        args = shlex.split(arg)
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--base" and i + 1 < len(args):
+                base_currency = args[i + 1].upper()
+                i += 2
+            else:
+                print("❌ Ошибка: неверный формат команды")
+                print("Использование: show-portfolio [--base <currency_code>]")
+                print("Пример: show-portfolio")
+                print("Пример: show-portfolio --base EUR")
+                return
+
+        # Проверяем, что валюта валидна
+        if not InputValidator.validate_currency_code(base_currency):
+            print(f"❌ Ошибка: неизвестная базовая валюта '{base_currency}'")
+            return
+
+        # Получаем данные портфеля
         success, message, portfolio_data = self.portfolio_manager.show_portfolio()
 
-        if success and portfolio_data:
-            print("\n📊 Ваш портфель:")
-            table = PrettyTable()
-            table.field_names = ["Валюта", "Баланс", "Стоимость в USD"]
-
-            for currency, balance in portfolio_data["data"].items():
-                table.add_row([currency, f"{balance:.4f}", f"${balance * 100:.2f}"])  # Упрощенный расчет
-
-            print(table)
-            print(f"💰 Общая стоимость: ${portfolio_data['total_value']:.2f}")
-        else:
+        if not success:
             print(f"❌ {message}")
+            return
+
+        if not portfolio_data:
+            print("❌ Портфель не найден")
+            return
+
+        # Получаем информацию о текущем пользователе
+        if not self.user_manager.is_logged_in:
+            print("❌ Ошибка: сначала выполните login")
+            return
+
+        username = self.user_manager.current_user.username
+
+        # Форматируем вывод
+        print(f"\nПортфель пользователя '{username}' (база: {base_currency}):")
+
+        total_value = 0
+        service = CurrencyService()
+
+        for currency, balance in portfolio_data["data"].items():
+            # Получаем курс конвертации
+            if currency == base_currency:
+                converted = balance
+            else:
+                rate = service.get_exchange_rate(currency, base_currency)
+                if not rate:
+                    print(f"❌ Ошибка: курс для {currency}/{base_currency} не найден")
+                    return
+                converted = balance * rate
+
+            total_value += converted
+
+            # Форматируем вывод для каждой валюты
+            print(f"- {currency}: {balance:,.4f}  → {converted:,.2f} {base_currency}")
+
+        print(f"{'-'*40}")
+        print(f"ИТОГО: {total_value:,.2f} {base_currency}")
 
     def do_buy(self, arg: str) -> None:
         """

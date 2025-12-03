@@ -332,23 +332,30 @@ class PortfolioManager:
         except ValueError as e:
             return False, str(e)
 
-    def show_portfolio(self) -> Tuple[bool, str, Optional[Dict]]:
+    def show_portfolio(self, base_currency: str = 'USD') -> Tuple[bool, str, Optional[Dict]]:
         """
         Показывает портфель текущего пользователя.
+
+        Args:
+            base_currency: Базовая валюта для расчета стоимости.
 
         Returns:
             Tuple[bool, str, Optional[Dict]]: (успех, сообщение, данные портфеля)
         """
         if not self._user_manager.is_logged_in:
-            return False, "Требуется авторизация", None
+            return False, "Сначала выполните login", None
 
         portfolio = self.get_current_portfolio()
         if not portfolio:
             return False, "Портфель не найден", None
 
+        # Проверяем, есть ли кошельки
+        if not portfolio.wallets:
+            return True, "Портфель пуст", {"data": {}, "total_value": 0.0}
+
         # Получаем данные портфеля
         portfolio_data = {}
-        total_value = portfolio.get_total_value('USD')
+        total_value = portfolio.get_total_value(base_currency)
 
         for currency_code, wallet in portfolio.wallets.items():
             portfolio_data[currency_code] = wallet.balance
