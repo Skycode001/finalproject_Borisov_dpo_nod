@@ -103,12 +103,12 @@ class TradingCLI(cmd.Cmd):
         else:
             print(f"❌ {message}")
 
-    def do_show_portfolio(self, arg: str) -> None:
+    def do_showportfolio(self, arg: str) -> None:
         """
         Показать портфель текущего пользователя.
-        Использование: show-portfolio [--base <currency_code>]
-        Пример: show-portfolio
-        Пример: show-portfolio --base EUR
+        Использование: showportfolio [--base <currency_code>]
+        Пример: showportfolio
+        Пример: showportfolio --base EUR
         """
         # Парсим аргументы
         base_currency = 'USD'  # значение по умолчанию
@@ -120,11 +120,13 @@ class TradingCLI(cmd.Cmd):
                 base_currency = args[i + 1].upper()
                 i += 2
             else:
-                print("❌ Ошибка: неверный формат команды")
-                print("Использование: show-portfolio [--base <currency_code>]")
-                print("Пример: show-portfolio")
-                print("Пример: show-portfolio --base EUR")
-                return
+                # Если есть аргументы, но не --base, это ошибка
+                if args:
+                    print("❌ Ошибка: неверный формат команды")
+                    print("Использование: showportfolio [--base <currency_code>]")
+                    print("Пример: showportfolio")
+                    print("Пример: showportfolio --base EUR")
+                    return
 
         # Проверяем, что валюта валидна
         if not InputValidator.validate_currency_code(base_currency):
@@ -132,7 +134,7 @@ class TradingCLI(cmd.Cmd):
             return
 
         # Получаем данные портфеля
-        success, message, portfolio_data = self.portfolio_manager.show_portfolio()
+        success, message, portfolio_data = self.portfolio_manager.show_portfolio(base_currency)
 
         if not success:
             print(f"❌ {message}")
@@ -149,10 +151,15 @@ class TradingCLI(cmd.Cmd):
 
         username = self.user_manager.current_user.username
 
+        # Проверяем, есть ли данные в портфеле
+        if not portfolio_data["data"]:
+            print(f"Портфель пользователя '{username}' пуст")
+            return
+
         # Форматируем вывод
         print(f"\nПортфель пользователя '{username}' (база: {base_currency}):")
 
-        total_value = 0
+        total_value = portfolio_data["total_value"]
         service = CurrencyService()
 
         for currency, balance in portfolio_data["data"].items():
@@ -165,8 +172,6 @@ class TradingCLI(cmd.Cmd):
                     print(f"❌ Ошибка: курс для {currency}/{base_currency} не найден")
                     return
                 converted = balance * rate
-
-            total_value += converted
 
             # Форматируем вывод для каждой валюты
             print(f"- {currency}: {balance:,.4f}  → {converted:,.2f} {base_currency}")
@@ -286,8 +291,13 @@ class TradingCLI(cmd.Cmd):
     # ===== Методы cmd.Cmd =====
     def default(self, line: str) -> None:
         """Обработка неизвестных команд."""
-        print(f"❌ Неизвестная команда: {line}")
-        print("   Введите 'help' для списка доступных команд")
+        # Если команда show-portfolio, перенаправляем на showportfolio
+        if line.startswith('show-portfolio'):
+            new_line = line.replace('show-portfolio', 'showportfolio', 1)
+            self.onecmd(new_line)
+        else:
+            print(f"❌ Неизвестная команда: {line}")
+            print("   Введите 'help' для списка доступных команд")
 
     def emptyline(self) -> None:
         """Обработка пустой строки."""
@@ -310,7 +320,8 @@ class TradingCLI(cmd.Cmd):
                 ("register", "Регистрация нового пользователя", "register --username alice --password 1234"),
                 ("login", "Вход в систему", "login --username alice --password 1234"),
                 ("logout", "Выход из системы", "logout"),
-                ("show-portfolio", "Показать портфель", "show-portfolio"),
+                ("showportfolio", "Показать портфель", "showportfolio"),
+                ("showportfolio --base EUR", "Портфель в EUR", "showportfolio --base EUR"),
                 ("buy", "Купить валюту", "buy BTC 0.5"),
                 ("sell", "Продать валюту", "sell BTC 0.1"),
                 ("get-rate", "Получить курс валюты", "get-rate EUR USD"),
@@ -323,6 +334,7 @@ class TradingCLI(cmd.Cmd):
                 commands_table.add_row([cmd_name, desc, example])
 
             print(commands_table)
+            print("\n💡 Подсказка: команду show-portfolio также можно использовать как showportfolio")
 
 
 def run_cli() -> None:
