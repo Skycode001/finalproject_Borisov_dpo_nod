@@ -1,5 +1,6 @@
 import cmd
 import shlex
+from datetime import datetime
 
 from prettytable import PrettyTable
 
@@ -355,29 +356,59 @@ class TradingCLI(cmd.Cmd):
         else:
             print(f"❌ {message}")
 
-    def do_get_rate(self, arg: str) -> None:
+    def do_getrate(self, arg: str) -> None:
         """
         Получить курс валюты.
-        Использование: get-rate <currency_code> [target_currency]
-        Пример: get-rate BTC USD
-        Пример: get-rate EUR (по умолчанию к USD)
+        Использование: getrate --from <currency_code> --to <currency_code>
+        Пример: getrate --from USD --to BTC
+        Пример: getrate --from EUR --to USD
         """
-        args = shlex.split(arg)
+        # Парсим аргументы
+        from_currency = None
+        to_currency = None
 
-        if len(args) == 0:
-            print("Использование: get-rate <currency_code> [target_currency]")
-            print("Пример: get-rate BTC USD")
-            print("Пример: get-rate EUR (по умолчанию к USD)")
+        args = shlex.split(arg)
+        i = 0
+        while i < len(args):
+            if args[i] == "--from" and i + 1 < len(args):
+                from_currency = args[i + 1].upper()
+                i += 2
+            elif args[i] == "--to" and i + 1 < len(args):
+                to_currency = args[i + 1].upper()
+                i += 2
+            else:
+                print("❌ Ошибка: неверный формат команды")
+                print("Использование: getrate --from <currency_code> --to <currency_code>")
+                print("Пример: getrate --from USD --to BTC")
+                print("Пример: getrate --from EUR --to USD")
+                return
+
+        # Проверяем обязательные аргументы
+        if not from_currency or not to_currency:
+            print("❌ Ошибка: требуются оба аргумента --from и --to")
+            print("Использование: getrate --from <currency_code> --to <currency_code>")
+            print("Пример: getrate --from USD --to BTC")
             return
 
-        from_currency = args[0]
-        to_currency = args[1] if len(args) > 1 else 'USD'
-
-        success, message, rate = self.rate_manager.get_rate(from_currency, to_currency)
+        # Получаем курс
+        success, message, rate, updated_at = self.rate_manager.get_rate(from_currency, to_currency)
 
         if success and rate is not None:
-            print(f"✅ {message}: {rate:.6f}")
-            print(f"   1 {from_currency.upper()} = {rate:.6f} {to_currency.upper()}")
+            # Форматируем время обновления
+            time_str = "неизвестно"
+            if updated_at:
+                try:
+                    dt = datetime.fromisoformat(updated_at)
+                    time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError):
+                    time_str = updated_at
+
+            print(f"✅ {message}: {rate:.8f} (обновлено: {time_str})")
+
+            # Показываем обратный курс если он не бесконечный
+            if rate != 0:
+                reverse_rate = 1 / rate
+                print(f"   Обратный курс {to_currency}→{from_currency}: {reverse_rate:.2f}")
         else:
             print(f"❌ {message}")
 
@@ -419,6 +450,10 @@ class TradingCLI(cmd.Cmd):
         if line.startswith('show-portfolio'):
             new_line = line.replace('show-portfolio', 'showportfolio', 1)
             self.onecmd(new_line)
+        # Если команда get-rate, перенаправляем на getrate (без дефиса)
+        elif line.startswith('get-rate'):
+            new_line = line.replace('get-rate', 'getrate', 1)
+            self.onecmd(new_line)
         else:
             print(f"❌ Неизвестная команда: {line}")
             print("   Введите 'help' для списка доступных команд")
@@ -444,11 +479,11 @@ class TradingCLI(cmd.Cmd):
                 ("register", "Регистрация нового пользователя", "register --username alice --password 1234"),
                 ("login", "Вход в систему", "login --username alice --password 1234"),
                 ("logout", "Выход из системы", "logout"),
-                ("showportfolio", "Показать портфель", "showportfolio"),
+                ("showportfolio / show-portfolio", "Показать портфель", "showportfolio"),
                 ("showportfolio --base EUR", "Портфель в EUR", "showportfolio --base EUR"),
                 ("buy", "Купить валюту", "buy --currency BTC --amount 0.05"),
                 ("sell", "Продать валюту", "sell --currency BTC --amount 0.01"),
-                ("get-rate", "Получить курс валюты", "get-rate EUR USD"),
+                ("getrate / get-rate", "Получить курс валюты", "getrate --from USD --to BTC"),
                 ("whoami", "Инфо о текущем пользователе", "whoami"),
                 ("exit/quit", "Выход из приложения", "exit"),
                 ("help", "Показать эту справку", "help"),

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import Portfolio, User
@@ -390,6 +391,7 @@ class RateManager:
 
     def __init__(self):
         self._rates_data = self._load_rates()
+        self._CACHE_DURATION = timedelta(minutes=5)  # 5 минут
 
     def _load_rates(self) -> Dict:
         """Загружает курсы из JSON-файла."""
@@ -404,7 +406,30 @@ class RateManager:
         """Сохраняет курсы в JSON-файл."""
         return DataManager.save_json(RATES_FILE, self._rates_data)
 
-    def get_rate(self, from_currency: str, to_currency: str = 'USD') -> Tuple[bool, str, Optional[float]]:
+    def _is_rate_fresh(self, rate_data: Dict) -> bool:
+        """Проверяет свежесть курса."""
+        if not rate_data or "updated_at" not in rate_data:
+            return False
+
+        try:
+            updated_at = datetime.fromisoformat(rate_data["updated_at"])
+            return datetime.now() - updated_at < self._CACHE_DURATION
+        except (ValueError, TypeError):
+            return False
+
+    def _get_rate_from_cache(self, from_currency: str, to_currency: str) -> Tuple[Optional[float], Optional[str]]:
+        """Получает курс из кеша."""
+        # Формируем ключ в формате EUR_USD
+        pair_key = f"{from_currency}_{to_currency}"
+
+        if pair_key in self._rates_data:
+            rate_data = self._rates_data[pair_key]
+            if self._is_rate_fresh(rate_data):
+                return rate_data.get("rate"), rate_data.get("updated_at")
+
+        return None, None
+
+    def get_rate(self, from_currency: str, to_currency: str = 'USD') -> Tuple[bool, str, Optional[float], Optional[str]]:
         """
         Получает курс между валютами.
 
@@ -413,26 +438,37 @@ class RateManager:
             to_currency: Целевая валюта.
 
         Returns:
-            Tuple[bool, str, Optional[float]]: (успех, сообщение, курс)
+            Tuple[bool, str, Optional[float], Optional[str]]: (успех, сообщение, курс, время обновления)
         """
         # Валидация
         if not InputValidator.validate_currency_code(from_currency):
-            return False, "Неверный код исходной валюты", None
+            return False, f"Неверный код исходной валюты '{from_currency}'", None, None
 
         if not InputValidator.validate_currency_code(to_currency):
-            return False, "Неверный код целевой валюты", None
+            return False, f"Неверный код целевой валюты '{to_currency}'", None, None
 
         from_currency = from_currency.upper()
         to_currency = to_currency.upper()
 
-        # Получаем курс
-        service = CurrencyService()
-        rate = service.get_exchange_rate(from_currency, to_currency)
+        # Пытаемся получить свежий курс из кеша
+        rate, updated_at = self._get_rate_from_cache(from_currency, to_currency)
 
-        if rate:
-            return True, f"Курс {from_currency}/{to_currency}", rate
-        else:
-            return False, f"Курс {from_currency}/{to_currency} не найден", None
+        if rate is not None:
+            return True, f"Курс {from_currency}→{to_currency}", rate, updated_at
+
+        # Если курс устарел или отсутствует, обновляем
+        success, message = self.update_rates()
+        if not success:
+            return False, f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже.", None, None
+
+        # Пробуем снова после обновления
+        rate, updated_at = self._get_rate_from_cache(from_currency, to_currency)
+
+        if rate is not None:
+            return True, f"Курс {from_currency}→{to_currency}", rate, updated_at
+
+        # Если курс не найден даже после обновления
+        return False, f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже.", None, None
 
     def get_all_rates(self) -> Dict[str, Dict[str, Any]]:
         """
