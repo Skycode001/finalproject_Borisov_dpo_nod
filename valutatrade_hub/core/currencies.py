@@ -208,7 +208,7 @@ def get_currency(code: str) -> Currency:
         _initialize_currency_registry()
 
     if code not in _CURRENCY_REGISTRY:
-        raise CurrencyNotFoundError(f"Валюта с кодом '{code}' не найдена")
+        raise CurrencyNotFoundError(code)  # Изменено здесь
 
     return _CURRENCY_REGISTRY[code]
 

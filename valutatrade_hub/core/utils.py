@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 from prettytable import PrettyTable
 
+from .exceptions import ApiRequestError  # Добавляем импорт
+
 
 class DataManager:
     """Класс для управления JSON-файлами данных."""
@@ -12,7 +14,7 @@ class DataManager:
     @staticmethod
     def load_json(file_path: str) -> Any:
         """
-        Загружает данные из JSON-файла.
+        Загружает данные из JSON  файла.
 
         Args:
             file_path: Путь к JSON-файлу.
@@ -132,7 +134,15 @@ class CurrencyService:
 
         Returns:
             Курс обмена или None если курс не найден.
+
+        Raises:
+            ApiRequestError: Если произошла ошибка при обращении к API (заглушка).
         """
+        # Для демонстрации ApiRequestError - с вероятностью 10% имитируем сбой API
+        import random
+        if random.random() < 0.1:  # 10% chance
+            raise ApiRequestError("Временная недоступность сервиса курсов")
+
         # Фиксированные курсы для тестирования
         fixed_rates = {
             'USD': {'USD': 1.0, 'EUR': 0.92, 'BTC': 0.000025, 'RUB': 95.0},
@@ -162,7 +172,15 @@ class CurrencyService:
 
         Returns:
             Словарь с курсами валют.
+
+        Raises:
+            ApiRequestError: Если произошла ошибка при обращении к API.
         """
+        # Для демонстрации ApiRequestError - с вероятностью 10% имитируем сбой API
+        import random
+        if random.random() < 0.1:  # 10% chance
+            raise ApiRequestError("Сервис курсов временно недоступен")
+
         now = datetime.now().isoformat()
 
         return {

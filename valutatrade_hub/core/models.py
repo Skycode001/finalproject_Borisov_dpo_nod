@@ -2,6 +2,8 @@ import hashlib
 from datetime import datetime
 from typing import Optional
 
+from .exceptions import InsufficientFundsError  # Добавляем импорт
+
 
 class User:
     """Класс, представляющий пользователя системы."""
@@ -174,18 +176,16 @@ class Wallet:
         # Обновляем баланс через сеттер
         self.balance = self._balance + amount
 
-    def withdraw(self, amount: float) -> bool:
+    def withdraw(self, amount: float) -> None:
         """
         Снимает средства с кошелька.
 
         Args:
             amount: Сумма для снятия.
 
-        Returns:
-            bool: True если снятие успешно, False если недостаточно средств.
-
         Raises:
             ValueError: Если сумма некорректна (не число или отрицательная).
+            InsufficientFundsError: Если недостаточно средств.
         """
         # Проверка типа и положительности
         if not isinstance(amount, (int, float)):
@@ -194,13 +194,12 @@ class Wallet:
         if amount <= 0:
             raise ValueError("Сумма снятия должна быть положительным числом.")
 
-        # Проверка достаточности средств
+        # Проверка достаточности средств с вызовом исключения
         if amount > self._balance:
-            return False
+            raise InsufficientFundsError(self._balance, amount, self.currency_code)
 
         # Обновляем баланс через сеттер
         self.balance = self._balance - amount
-        return True
 
     def get_balance_info(self) -> dict:
         """
@@ -226,6 +225,7 @@ class Wallet:
             currency_code=data["currency_code"],
             balance=data["balance"]
         )
+
 
 class Portfolio:
     """Класс, представляющий портфель всех кошельков одного пользователя."""

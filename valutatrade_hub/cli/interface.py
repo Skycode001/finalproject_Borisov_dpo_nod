@@ -4,6 +4,12 @@ from datetime import datetime
 
 from prettytable import PrettyTable
 
+from ..core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+    ValutaTradeError,
+)
 from ..core.usecases import PortfolioManager, RateManager, UserManager
 from ..core.utils import CurrencyService, InputValidator
 
@@ -19,6 +25,36 @@ class TradingCLI(cmd.Cmd):
         self.user_manager = UserManager()
         self.portfolio_manager = PortfolioManager(self.user_manager)
         self.rate_manager = RateManager()
+
+    # ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
+
+    def _handle_exception(self, e: Exception) -> None:
+        """Обрабатывает исключения и выводит соответствующие сообщения."""
+        if isinstance(e, InsufficientFundsError):
+            # Печатаем текст ошибки как есть
+            print(f"❌ {str(e)}")
+
+        elif isinstance(e, CurrencyNotFoundError):
+            # Показываем сообщение и предлагаем помощь
+            print(f"❌ {str(e)}")
+            print("   Для просмотра списка поддерживаемых валют используйте команду:")
+            print("   get-rate --from USD --to <валюта>")
+            print("   или проверьте правильность написания кода валюты.")
+
+        elif isinstance(e, ApiRequestError):
+            # Предлагаем повторить позже / проверить сеть
+            print(f"❌ {str(e)}")
+            print("   Пожалуйста, повторите попытку позже.")
+            print("   Проверьте подключение к сети и доступность сервиса.")
+
+        elif isinstance(e, ValutaTradeError):
+            # Для других пользовательских исключений
+            print(f"❌ {str(e)}")
+
+        else:
+            # Для неожиданных исключений
+            print(f"❌ Непредвиденная ошибка: {type(e).__name__}: {str(e)}")
+            print("   Пожалуйста, сообщите об этом разработчику.")
 
     # ===== ОБЯЗАТЕЛЬНЫЕ КОМАНДЫ =====
 
@@ -185,6 +221,10 @@ class TradingCLI(cmd.Cmd):
         Купить валюту.
         Использование: buy --currency <currency_code> --amount <amount>
         Пример: buy --currency BTC --amount 0.05
+
+        Ошибки:
+        - CurrencyNotFoundError: "Неизвестная валюта '{code}'"
+        - ApiRequestError: "Ошибка при обращении к внешнему API: {reason}"
         """
         # Проверка авторизации
         if not self.user_manager.is_logged_in:
@@ -232,43 +272,60 @@ class TradingCLI(cmd.Cmd):
             print("❌ Ошибка: 'amount' должен быть положительным числом")
             return
 
-        # Получаем текущий курс
-        service = CurrencyService()
-        rate = service.get_exchange_rate(currency_code, 'USD')
+        try:
+            # Проверяем существование валюты (может выбросить CurrencyNotFoundError)
+            try:
+                from ..core.currencies import get_currency
+                get_currency(currency_code)
+            except CurrencyNotFoundError as e:
+                self._handle_exception(e)
+                return
 
-        if not rate:
-            print(f"❌ Ошибка: не удалось получить курс для {currency_code}→USD")
-            return
+            # Получаем текущий курс (может выбросить ApiRequestError)
+            service = CurrencyService()
+            rate = service.get_exchange_rate(currency_code, 'USD')
 
-        # Рассчитываем стоимость покупки
-        cost_usd = amount * rate
+            if not rate:
+                print(f"❌ Ошибка: не удалось получить курс для {currency_code}→USD")
+                return
 
-        # Получаем текущий баланс до покупки
-        current_balance = self.portfolio_manager.get_wallet_balance(currency_code)
-        if current_balance is None:
-            current_balance = 0.0
+            # Рассчитываем стоимость покупки
+            cost_usd = amount * rate
 
-        # Выполняем покупку
-        success, message = self.portfolio_manager.buy_currency(currency_code, amount)
+            # Получаем текущий баланс до покупки
+            current_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+            if current_balance is None:
+                current_balance = 0.0
 
-        if success:
-            # Получаем новый баланс после покупки
-            new_balance = self.portfolio_manager.get_wallet_balance(currency_code)
-            if new_balance is None:
-                new_balance = current_balance + amount
+            # Выполняем покупку
+            success, message = self.portfolio_manager.buy_currency(currency_code, amount)
 
-            print(f"✅ Покупка выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}")
-            print("   Изменения в портфеле:")
-            print(f"   - {currency_code}: было {current_balance:.4f} → стало {new_balance:.4f}")
-            print(f"   Оценочная стоимость покупки: {cost_usd:,.2f} USD")
-        else:
-            print(f"❌ {message}")
+            if success:
+                # Получаем новый баланс после покупки
+                new_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+                if new_balance is None:
+                    new_balance = current_balance + amount
+
+                print(f"✅ Покупка выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}")
+                print("   Изменения в портфеле:")
+                print(f"   - {currency_code}: было {current_balance:.4f} → стало {new_balance:.4f}")
+                print(f"   Оценочная стоимость покупки: {cost_usd:,.2f} USD")
+            else:
+                print(f"❌ {message}")
+
+        except ApiRequestError as e:
+            self._handle_exception(e)
+        except Exception as e:
+            print(f"❌ Непредвиденная ошибка: {e}")
 
     def do_sell(self, arg: str) -> None:
         """
         Продать валюту.
         Использование: sell --currency <currency_code> --amount <amount>
         Пример: sell --currency BTC --amount 0.01
+
+        Ошибки:
+        - InsufficientFundsError: "Недостаточно средств: доступно X.XXXX {code}, требуется X.XXXX {code}"
         """
         # Проверка авторизации
         if not self.user_manager.is_logged_in:
@@ -316,45 +373,46 @@ class TradingCLI(cmd.Cmd):
             print("❌ Ошибка: 'amount' должен быть положительным числом")
             return
 
-        # Получаем текущий баланс до продажи
-        current_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+        try:
+            # Получаем текущий баланс до продажи
+            current_balance = self.portfolio_manager.get_wallet_balance(currency_code)
 
-        # Проверяем существование кошелька
-        if current_balance is None:
-            print(f"❌ Ошибка: у вас нет кошелька '{currency_code}'. Добавьте валюту: она создаётся автоматически при первой покупке.")
-            return
+            # Проверяем существование кошелька
+            if current_balance is None:
+                print(f"❌ Ошибка: у вас нет кошелька '{currency_code}'. Добавьте валюту: она создаётся автоматически при первой покупке.")
+                return
 
-        # Проверяем достаточность средств
-        if current_balance < amount:
-            print(f"❌ Ошибка: недостаточно средств: доступно {current_balance:.4f} {currency_code}, требуется {amount:.4f} {currency_code}")
-            return
+            # Получаем текущий курс
+            service = CurrencyService()
+            rate = service.get_exchange_rate(currency_code, 'USD')
 
-        # Получаем текущий курс
-        service = CurrencyService()
-        rate = service.get_exchange_rate(currency_code, 'USD')
+            if not rate:
+                print(f"❌ Ошибка: не удалось получить курс для {currency_code}→USD")
+                return
 
-        if not rate:
-            print(f"❌ Ошибка: не удалось получить курс для {currency_code}→USD")
-            return
+            # Рассчитываем выручку от продажи
+            revenue_usd = amount * rate
 
-        # Рассчитываем выручку от продажи
-        revenue_usd = amount * rate
+            # Выполняем продажу (может выбросить InsufficientFundsError)
+            success, message = self.portfolio_manager.sell_currency(currency_code, amount)
 
-        # Выполняем продажу
-        success, message = self.portfolio_manager.sell_currency(currency_code, amount)
+            if success:
+                # Получаем новый баланс после продажи
+                new_balance = self.portfolio_manager.get_wallet_balance(currency_code)
+                if new_balance is None:
+                    new_balance = 0.0
 
-        if success:
-            # Получаем новый баланс после продажи
-            new_balance = self.portfolio_manager.get_wallet_balance(currency_code)
-            if new_balance is None:
-                new_balance = 0.0
+                print(f"✅ Продажа выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}")
+                print("   Изменения в портфеле:")
+                print(f"   - {currency_code}: было {current_balance:.4f} → стало {new_balance:.4f}")
+                print(f"   Оценочная выручка: {revenue_usd:,.2f} USD")
+            else:
+                print(f"❌ {message}")
 
-            print(f"✅ Продажа выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}")
-            print("   Изменения в портфеле:")
-            print(f"   - {currency_code}: было {current_balance:.4f} → стало {new_balance:.4f}")
-            print(f"   Оценочная выручка: {revenue_usd:,.2f} USD")
-        else:
-            print(f"❌ {message}")
+        except ValutaTradeError as e:
+            self._handle_exception(e)
+        except Exception as e:
+            print(f"❌ Непредвиденная ошибка: {e}")
 
     def do_getrate(self, arg: str) -> None:
         """
@@ -362,6 +420,10 @@ class TradingCLI(cmd.Cmd):
         Использование: getrate --from <currency_code> --to <currency_code>
         Пример: getrate --from USD --to BTC
         Пример: getrate --from EUR --to USD
+
+        Ошибки:
+        - CurrencyNotFoundError: "Неизвестная валюта '{code}'"
+        - ApiRequestError: "Ошибка при обращении к внешнему API: {reason}"
         """
         # Парсим аргументы
         from_currency = None
@@ -390,27 +452,44 @@ class TradingCLI(cmd.Cmd):
             print("Пример: getrate --from USD --to BTC")
             return
 
-        # Получаем курс
-        success, message, rate, updated_at = self.rate_manager.get_rate(from_currency, to_currency)
+        try:
+            # Проверяем существование валют через get_currency (может выбросить CurrencyNotFoundError)
+            try:
+                from ..core.currencies import get_currency
+                get_currency(from_currency)
+                get_currency(to_currency)
+            except CurrencyNotFoundError as e:
+                self._handle_exception(e)
+                return
 
-        if success and rate is not None:
-            # Форматируем время обновления
-            time_str = "неизвестно"
-            if updated_at:
-                try:
-                    dt = datetime.fromisoformat(updated_at)
-                    time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                except (ValueError, TypeError):
-                    time_str = updated_at
+            # Получаем курс (может выбросить ApiRequestError через CurrencyService)
+            success, message, rate, updated_at = self.rate_manager.get_rate(from_currency, to_currency)
 
-            print(f"✅ {message}: {rate:.8f} (обновлено: {time_str})")
+            if success and rate is not None:
+                # Форматируем время обновления
+                time_str = "неизвестно"
+                if updated_at:
+                    try:
+                        dt = datetime.fromisoformat(updated_at)
+                        time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except (ValueError, TypeError):
+                        time_str = updated_at
 
-            # Показываем обратный курс если он не бесконечный
-            if rate != 0:
-                reverse_rate = 1 / rate
-                print(f"   Обратный курс {to_currency}→{from_currency}: {reverse_rate:.2f}")
-        else:
-            print(f"❌ {message}")
+                print(f"✅ {message}: {rate:.8f} (обновлено: {time_str})")
+
+                # Показываем обратный курс если он не бесконечный
+                if rate != 0:
+                    reverse_rate = 1 / rate
+                    print(f"   Обратный курс {to_currency}→{from_currency}: {reverse_rate:.2f}")
+            else:
+                print(f"❌ {message}")
+
+        except ApiRequestError as e:
+            self._handle_exception(e)
+        except CurrencyNotFoundError as e:
+            self._handle_exception(e)
+        except Exception as e:
+            print(f"❌ Непредвиденная ошибка: {e}")
 
     def do_exit(self, _: str) -> None:
         """Выйти из приложения: exit"""
@@ -470,30 +549,36 @@ class TradingCLI(cmd.Cmd):
             print("\n📋 Доступные команды:\n")
 
             commands_table = PrettyTable()
-            commands_table.field_names = ["Команда", "Описание", "Пример"]
+            commands_table.field_names = ["Команда", "Описание", "Пример", "Возможные ошибки"]
             commands_table.align["Команда"] = "l"
             commands_table.align["Описание"] = "l"
             commands_table.align["Пример"] = "l"
+            commands_table.align["Возможные ошибки"] = "l"
 
             commands = [
-                ("register", "Регистрация нового пользователя", "register --username alice --password 1234"),
-                ("login", "Вход в систему", "login --username alice --password 1234"),
-                ("logout", "Выход из системы", "logout"),
-                ("showportfolio / show-portfolio", "Показать портфель", "showportfolio"),
-                ("showportfolio --base EUR", "Портфель в EUR", "showportfolio --base EUR"),
-                ("buy", "Купить валюту", "buy --currency BTC --amount 0.05"),
-                ("sell", "Продать валюту", "sell --currency BTC --amount 0.01"),
-                ("getrate / get-rate", "Получить курс валюты", "getrate --from USD --to BTC"),
-                ("whoami", "Инфо о текущем пользователе", "whoami"),
-                ("exit/quit", "Выход из приложения", "exit"),
-                ("help", "Показать эту справку", "help"),
+                ("register", "Регистрация нового пользователя", "register --username alice --password 1234", "Username занят, пароль короткий"),
+                ("login", "Вход в систему", "login --username alice --password 1234", "Пользователь не найден, неверный пароль"),
+                ("logout", "Выход из системы", "logout", "-"),
+                ("showportfolio / show-portfolio", "Показать портфель", "showportfolio", "Требуется авторизация"),
+                ("showportfolio --base EUR", "Портфель в EUR", "showportfolio --base EUR", "Неизвестная базовая валюта"),
+                ("buy", "Купить валюту", "buy --currency BTC --amount 0.05", "CurrencyNotFoundError, ApiRequestError"),
+                ("sell", "Продать валюту", "sell --currency BTC --amount 0.01", "InsufficientFundsError, ApiRequestError"),
+                ("getrate / get-rate", "Получить курс валюты", "getrate --from USD --to BTC", "CurrencyNotFoundError, ApiRequestError"),
+                ("whoami", "Инфо о текущем пользователе", "whoami", "-"),
+                ("exit/quit", "Выход из приложения", "exit", "-"),
+                ("help", "Показать эту справку", "help", "-"),
             ]
 
-            for cmd_name, desc, example in commands:
-                commands_table.add_row([cmd_name, desc, example])
+            for cmd_name, desc, example, errors in commands:
+                commands_table.add_row([cmd_name, desc, example, errors])
 
             print(commands_table)
-            print("\n💡 Подсказка: команду show-portfolio также можно использовать как showportfolio")
+
+            print("\n🛑 Описание ошибок:")
+            print("  • CurrencyNotFoundError - неизвестная валюта")
+            print("  • InsufficientFundsError - недостаточно средств")
+            print("  • ApiRequestError - ошибка внешнего API")
+            print("\n💡 Подсказка: используйте getrate --from USD --to <валюта> для проверки доступности валюты")
 
 
 def run_cli() -> None:

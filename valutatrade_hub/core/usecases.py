@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from .exceptions import ApiRequestError, InsufficientFundsError
 from .models import Portfolio, User
 from .utils import CurrencyService, DataManager, InputValidator
 
@@ -218,7 +219,11 @@ class PortfolioManager:
 
         # Получаем курс
         service = CurrencyService()
-        rate = service.get_exchange_rate(currency_code, 'USD')
+        try:
+            rate = service.get_exchange_rate(currency_code, 'USD')
+        except ApiRequestError:
+            return False, f"Ошибка при получении курса для {currency_code}→USD"
+
         if not rate:
             return False, f"Не удалось получить курс для {currency_code}→USD"
 
@@ -244,9 +249,7 @@ class PortfolioManager:
                 return False, f"Недостаточно средств. Нужно: ${cost_usd:.2f}, доступно: ${usd_wallet.balance:.2f}"
 
             # Выполняем транзакцию
-            if not usd_wallet.withdraw(cost_usd):
-                return False, "Ошибка при списании USD"
-
+            usd_wallet.withdraw(cost_usd)
             target_wallet.deposit(amount)
 
             # Сохраняем изменения
@@ -255,6 +258,9 @@ class PortfolioManager:
             else:
                 return False, "Ошибка при сохранении данных"
 
+        except InsufficientFundsError as e:
+            # Перебрасываем исключение дальше для обработки в CLI
+            raise e
         except ValueError as e:
             return False, str(e)
 
@@ -293,9 +299,24 @@ class PortfolioManager:
         if currency_code not in portfolio.wallets:
             return False, f"У вас нет кошелька '{currency_code}'. Добавьте валюту: она создаётся автоматически при первой покупке."
 
+        # Получаем текущий баланс до продажи
+        try:
+            source_wallet = portfolio.get_wallet(currency_code)
+            current_balance = source_wallet.balance
+        except ValueError:
+            return False, f"Кошелёк с валютой '{currency_code}' не найден"
+
+        # Проверяем достаточно ли валюты для продажи
+        if current_balance < amount:
+            raise InsufficientFundsError(current_balance, amount, currency_code)
+
         # Получаем курс
         service = CurrencyService()
-        rate = service.get_exchange_rate(currency_code, 'USD')
+        try:
+            rate = service.get_exchange_rate(currency_code, 'USD')
+        except ApiRequestError:
+            return False, f"Ошибка при получении курса для {currency_code}→USD"
+
         if not rate:
             return False, f"Не удалось получить курс для {currency_code}→USD"
 
@@ -303,25 +324,15 @@ class PortfolioManager:
         revenue_usd = amount * rate
 
         try:
-            # Получаем текущий баланс
-            current_balance = portfolio.get_wallet(currency_code).balance
-
-            # Проверяем достаточно ли валюты для продажи
-            if current_balance < amount:
-                return False, f"Недостаточно средств: доступно {current_balance:.4f} {currency_code}, требуется {amount:.4f} {currency_code}"
-
             # Проверяем/создаем USD кошелек (для зачисления)
             if 'USD' not in portfolio.wallets:
                 portfolio.add_currency('USD')
 
             # Получаем кошельки
-            source_wallet = portfolio.get_wallet(currency_code)
             usd_wallet = portfolio.get_wallet('USD')
 
             # Выполняем транзакцию
-            if not source_wallet.withdraw(amount):
-                return False, f"Ошибка при списании {currency_code}"
-
+            source_wallet.withdraw(amount)  # Может выбросить InsufficientFundsError
             usd_wallet.deposit(revenue_usd)
 
             # Сохраняем изменения
@@ -330,6 +341,9 @@ class PortfolioManager:
             else:
                 return False, "Ошибка при сохранении данных"
 
+        except InsufficientFundsError as e:
+            # Перебрасываем исключение дальше для обработки в CLI
+            raise e
         except ValueError as e:
             return False, str(e)
 
@@ -398,8 +412,12 @@ class RateManager:
         rates_data = DataManager.load_json(RATES_FILE)
         if not rates_data:
             # Если файл пуст, создаем заглушку
-            rates_data = CurrencyService.get_all_rates()
-            DataManager.save_json(RATES_FILE, rates_data)
+            try:
+                rates_data = CurrencyService.get_all_rates()
+                DataManager.save_json(RATES_FILE, rates_data)
+            except ApiRequestError:
+                # Если API недоступно, используем пустые данные
+                rates_data = {}
         return rates_data
 
     def _save_rates(self) -> bool:
@@ -492,5 +510,7 @@ class RateManager:
                 return True, "Курсы успешно обновлены"
             else:
                 return False, "Ошибка при сохранении курсов"
-        except Exception as e:
+        except ApiRequestError as e:
             return False, f"Ошибка при обновлении курсов: {str(e)}"
+        except Exception as e:
+            return False, f"Неожиданная ошибка при обновлении курсов: {str(e)}"
