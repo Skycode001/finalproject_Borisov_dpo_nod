@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from .exceptions import ApiRequestError, InsufficientFundsError
-from .infra.settings import settings  # Импорт синглтона настроек
+from ..infra.settings import settings   # Импорт синглтона настроек
 from .models import Portfolio, User
 from .utils import CurrencyService, DataManager, InputValidator
 
