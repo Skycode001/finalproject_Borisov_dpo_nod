@@ -3,13 +3,9 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from .exceptions import ApiRequestError, InsufficientFundsError
+from .infra.settings import settings  # Импорт синглтона настроек
 from .models import Portfolio, User
 from .utils import CurrencyService, DataManager, InputValidator
-
-DATA_DIR = "data"
-USERS_FILE = os.path.join(DATA_DIR, "users.json")
-PORTFOLIOS_FILE = os.path.join(DATA_DIR, "portfolios.json")
-RATES_FILE = os.path.join(DATA_DIR, "rates.json")
 
 
 class UserManager:
@@ -21,7 +17,12 @@ class UserManager:
 
     def _load_users(self) -> List[User]:
         """Загружает пользователей из JSON-файла."""
-        users_data = DataManager.load_json(USERS_FILE)
+        # Использование настроек для получения пути к файлу
+        data_dir = settings.get("database.path", "data")
+        users_file = settings.get("database.users_file", "users.json")
+        file_path = os.path.join(data_dir, users_file)
+
+        users_data = DataManager.load_json(file_path)
         users = []
         for user_data in users_data:
             try:
@@ -33,8 +34,13 @@ class UserManager:
 
     def _save_users(self) -> bool:
         """Сохраняет пользователей в JSON-файл."""
+        # Использование настроек для получения пути к файлу
+        data_dir = settings.get("database.path", "data")
+        users_file = settings.get("database.users_file", "users.json")
+        file_path = os.path.join(data_dir, users_file)
+
         users_data = [user.to_dict() for user in self._users]
-        return DataManager.save_json(USERS_FILE, users_data)
+        return DataManager.save_json(file_path, users_data)
 
     def register(self, username: str, password: str) -> Tuple[bool, str]:
         """
@@ -47,9 +53,12 @@ class UserManager:
         Returns:
             Tuple[bool, str]: (успех, сообщение)
         """
-        # Валидация
+        # Валидация с использованием настроек
+        min_username_length = 3  # Можно вынести в настройки
+        max_username_length = 20  # Можно вынести в настройки
+
         if not InputValidator.validate_username(username):
-            return False, "Имя пользователя должно содержать 3-20 буквенно-цифровых символов"
+            return False, f"Имя пользователя должно содержать {min_username_length}-{max_username_length} буквенно-цифровых символов"
 
         if not InputValidator.validate_password(password):
             return False, "Пароль должен быть не короче 4 символов"
@@ -132,7 +141,12 @@ class PortfolioManager:
 
     def _load_portfolios(self) -> Dict[int, Portfolio]:
         """Загружает портфели из JSON-файла."""
-        portfolios_data = DataManager.load_json(PORTFOLIOS_FILE)
+        # Использование настроек для получения пути к файлу
+        data_dir = settings.get("database.path", "data")
+        portfolios_file = settings.get("database.portfolios_file", "portfolios.json")
+        file_path = os.path.join(data_dir, portfolios_file)
+
+        portfolios_data = DataManager.load_json(file_path)
         portfolios = {}
 
         for portfolio_data in portfolios_data:
@@ -146,8 +160,13 @@ class PortfolioManager:
 
     def _save_portfolios(self) -> bool:
         """Сохраняет портфели в JSON-файл."""
+        # Использование настроек для получения пути к файлу
+        data_dir = settings.get("database.path", "data")
+        portfolios_file = settings.get("database.portfolios_file", "portfolios.json")
+        file_path = os.path.join(data_dir, portfolios_file)
+
         portfolios_data = [portfolio.to_dict() for portfolio in self._portfolios.values()]
-        return DataManager.save_json(PORTFOLIOS_FILE, portfolios_data)
+        return DataManager.save_json(file_path, portfolios_data)
 
     def create_portfolio_for_user(self, user_id: int) -> bool:
         """
@@ -212,6 +231,11 @@ class PortfolioManager:
         currency_code = currency_code.upper()
         amount = validated_amount
 
+        # Проверка минимальной суммы покупки из настроек
+        min_trade_amount = settings.get("trading.min_trade_amount", 0.0001)
+        if amount < min_trade_amount:
+            return False, f"Минимальная сумма покупки: {min_trade_amount}"
+
         # Получаем портфель
         portfolio = self.get_current_portfolio()
         if not portfolio:
@@ -229,6 +253,12 @@ class PortfolioManager:
 
         # Рассчитываем стоимость в USD
         cost_usd = amount * rate
+
+        # Применяем комиссию из настроек если есть
+        commission_rate = settings.get("trading.commission_rate", 0.0)
+        if commission_rate > 0:
+            commission = cost_usd * commission_rate
+            cost_usd += commission
 
         try:
             # Проверяем/создаем кошельки
@@ -290,6 +320,11 @@ class PortfolioManager:
         currency_code = currency_code.upper()
         amount = validated_amount
 
+        # Проверка минимальной суммы продажи из настроек
+        min_trade_amount = settings.get("trading.min_trade_amount", 0.0001)
+        if amount < min_trade_amount:
+            return False, f"Минимальная сумма продажи: {min_trade_amount}"
+
         # Получаем портфель
         portfolio = self.get_current_portfolio()
         if not portfolio:
@@ -322,6 +357,12 @@ class PortfolioManager:
 
         # Рассчитываем выручку в USD
         revenue_usd = amount * rate
+
+        # Применяем комиссию из настроек если есть
+        commission_rate = settings.get("trading.commission_rate", 0.0)
+        if commission_rate > 0:
+            commission = revenue_usd * commission_rate
+            revenue_usd -= commission
 
         try:
             # Проверяем/создаем USD кошелек (для зачисления)
@@ -364,6 +405,10 @@ class PortfolioManager:
         if not portfolio:
             return False, "Портфель не найден", None
 
+        # Используем базовую валюту из настроек если не указана
+        if not base_currency or base_currency == 'USD':
+            base_currency = settings.get("trading.default_base_currency", "USD")
+
         # Проверяем, есть ли кошельки
         if not portfolio.wallets:
             return True, "Портфель пуст", {"data": {}, "total_value": 0.0}
@@ -405,16 +450,27 @@ class RateManager:
 
     def __init__(self):
         self._rates_data = self._load_rates()
-        self._CACHE_DURATION = timedelta(minutes=5)  # 5 минут
+        # Использование настроек для TTL кеша курсов
+        cache_minutes = settings.get("api.rates_cache_duration_minutes", 5)
+        self._CACHE_DURATION = timedelta(minutes=cache_minutes)
+
+        # Настройки API из конфигурации
+        self._max_retries = settings.get("api.max_retries", 3)
+        self._timeout_seconds = settings.get("api.timeout_seconds", 10)
 
     def _load_rates(self) -> Dict:
         """Загружает курсы из JSON-файла."""
-        rates_data = DataManager.load_json(RATES_FILE)
+        # Использование настроек для получения пути к файлу
+        data_dir = settings.get("database.path", "data")
+        rates_file = settings.get("database.rates_file", "rates.json")
+        file_path = os.path.join(data_dir, rates_file)
+
+        rates_data = DataManager.load_json(file_path)
         if not rates_data:
             # Если файл пуст, создаем заглушку
             try:
                 rates_data = CurrencyService.get_all_rates()
-                DataManager.save_json(RATES_FILE, rates_data)
+                DataManager.save_json(file_path, rates_data)
             except ApiRequestError:
                 # Если API недоступно, используем пустые данные
                 rates_data = {}
@@ -422,7 +478,12 @@ class RateManager:
 
     def _save_rates(self) -> bool:
         """Сохраняет курсы в JSON-файл."""
-        return DataManager.save_json(RATES_FILE, self._rates_data)
+        # Использование настроек для получения пути к файлу
+        data_dir = settings.get("database.path", "data")
+        rates_file = settings.get("database.rates_file", "rates.json")
+        file_path = os.path.join(data_dir, rates_file)
+
+        return DataManager.save_json(file_path, self._rates_data)
 
     def _is_rate_fresh(self, rate_data: Dict) -> bool:
         """Проверяет свежесть курса."""

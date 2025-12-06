@@ -6,12 +6,15 @@ from ..logging_config import get_logger
 
 
 class SettingsLoader:
-    """Singleton класс для загрузки конфигурации."""
+    """
+    Singleton класс для загрузки конфигурации.
+    """
 
     _instance = None
     _settings = None
 
     def __new__(cls):
+        """Обеспечивает создание только одного экземпляра класса."""
         if cls._instance is None:
             cls._instance = super(SettingsLoader, cls).__new__(cls)
             cls._instance._initialize()
@@ -131,5 +134,5 @@ class SettingsLoader:
         self.logger.info("Настройки перезагружены")
 
 
-# Глобальный экземпляр настроек
+# Глобальный экземпляр настроек - гарантирует единую точку доступа
 settings = SettingsLoader()
