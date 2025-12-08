@@ -1,17 +1,21 @@
 import functools
 import logging
-from datetime import datetime
 from typing import Any, Callable
 
 
-def log_action(action_name: str = None, log_args: bool = True, log_result: bool = True):
+def log_action(action_name: str = None, verbose: bool = False):
     """
-    Декоратор для логирования действий.
+    Декоратор для логирования доменных операций.
+
+    Логирует операции в формате:
+    timestamp (ISO), action (BUY/SELL/REGISTER/LOGIN),
+    username (или user_id), currency_code, amount,
+    rate и base (если применимо),
+    result (OK/ERROR), error_type/error_message при исключениях.
 
     Args:
-        action_name: Название действия (если None, используется имя функции).
-        log_args: Логировать ли аргументы функции.
-        log_result: Логировать ли результат функции.
+        action_name: Название действия в верхнем регистре (BUY/SELL/REGISTER/LOGIN).
+        verbose: Дополнительно логировать контекст (например, состояние кошелька).
 
     Returns:
         Декоратор функции.
@@ -19,130 +23,140 @@ def log_action(action_name: str = None, log_args: bool = True, log_result: bool 
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Получаем логгер
             logger = logging.getLogger(func.__module__)
-            action = action_name or func.__name__
 
-            # Логируем начало действия
-            start_time = datetime.now()
-            log_message = f"Начало действия: {action}"
+            # Определяем действие
+            action = action_name or func.__name__.upper()
 
-            if log_args and (args or kwargs):
-                args_str = ", ".join([str(arg) for arg in args[1:]])  # Пропускаем self
-                kwargs_str = ", ".join([f"{k}={v}" for k, v in kwargs.items()])
-                all_args = ", ".join(filter(None, [args_str, kwargs_str]))
-                if all_args:
-                    log_message += f" | Аргументы: {all_args}"
-
-            logger.info(log_message)
+            # Извлекаем данные из аргументов
+            username = None
+            user_id = None
+            currency_code = None
+            amount = None
+            rate = None
+            base = 'USD'  # По умолчанию
+            extra_context = {}
 
             try:
-                # Выполняем функцию
+                # Для методов usecases первый аргумент - self
+                if args and hasattr(args[0], '_user_manager'):
+                    # Это метод usecases (buy_currency, sell_currency и т.д.)
+                    self_instance = args[0]
+
+                    # Получаем текущего пользователя если есть
+                    if hasattr(self_instance, '_user_manager'):
+                        user_manager = self_instance._user_manager
+                        if user_manager.is_logged_in and user_manager.current_user:
+                            user = user_manager.current_user
+                            username = user.username
+                            user_id = user.user_id
+
+                    # Извлекаем параметры из аргументов
+                    if len(args) > 1:
+                        currency_code = args[1] if len(args) > 1 else None
+                        amount = args[2] if len(args) > 2 else None
+
+                    # Или из kwargs
+                    currency_code = kwargs.get('currency_code', currency_code)
+                    amount = kwargs.get('amount', amount)
+
+                    # Для verbose режима получаем дополнительный контекст
+                    if verbose and hasattr(self_instance, '_portfolio_manager'):
+                        portfolio_manager = self_instance._portfolio_manager
+                        if currency_code and user_id:
+                            wallet_balance = portfolio_manager.get_wallet_balance(currency_code)
+                            if wallet_balance is not None:
+                                extra_context['wallet_balance_before'] = wallet_balance
+
+                # Основное выполнение
                 result = func(*args, **kwargs)
 
-                # Логируем успешное завершение
-                end_time = datetime.now()
-                duration = (end_time - start_time).total_seconds()
+                # Определяем результат
+                success = False
+                if isinstance(result, tuple) and len(result) > 0:
+                    success = result[0] if isinstance(result[0], bool) else True
+                elif result is not None:
+                    success = True
 
-                success_message = f"Завершено действие: {action} | Время: {duration:.3f} сек"
+                # Логируем успешное выполнение
+                log_record = logger.makeRecord(
+                    name=logger.name,
+                    level=logging.INFO,
+                    fn='',
+                    lno=0,
+                    msg=f"{action} операция выполнена",
+                    args=(),
+                    exc_info=None,
+                    extra={
+                        'action': action,
+                        'username': username or 'anonymous',
+                        'user_id': user_id,
+                        'currency_code': currency_code or 'N/A',
+                        'amount': float(amount) if amount is not None else 0.0,
+                        'rate': rate or 0.0,
+                        'base': base,
+                        'result': 'OK' if success else 'ERROR',
+                        **extra_context
+                    }
+                )
+                logger.handle(log_record)
 
-                if log_result and result is not None:
-                    result_str = str(result)
-                    if len(result_str) > 100:  # Обрезаем длинные результаты
-                        result_str = result_str[:97] + "..."
-                    success_message += f" | Результат: {result_str}"
-
-                logger.info(success_message)
+                # Для verbose режима логируем дополнительную информацию
+                if verbose and extra_context:
+                    logger.info(f"Контекст операции {action}: {extra_context}")
 
                 return result
 
             except Exception as e:
                 # Логируем ошибку
-                end_time = datetime.now()
-                duration = (end_time - start_time).total_seconds()
-
-                error_message = (
-                    f"Ошибка в действии: {action} | "
-                    f"Время: {duration:.3f} сек | "
-                    f"Ошибка: {type(e).__name__}: {str(e)}"
+                log_record = logger.makeRecord(
+                    name=logger.name,
+                    level=logging.ERROR,
+                    fn='',
+                    lno=0,
+                    msg=f"{action} операция завершилась ошибкой",
+                    args=(),
+                    exc_info=(type(e), e, e.__traceback__),
+                    extra={
+                        'action': action,
+                        'username': username or 'anonymous',
+                        'user_id': user_id,
+                        'currency_code': currency_code or 'N/A',
+                        'amount': float(amount) if amount is not None else 0.0,
+                        'rate': rate or 0.0,
+                        'base': base,
+                        'result': 'ERROR',
+                        'error_type': type(e).__name__,
+                        'error_message': str(e),
+                        **extra_context
+                    }
                 )
+                logger.handle(log_record)
 
-                logger.error(error_message, exc_info=True)
+                # Пробрасываем исключение дальше
                 raise
 
         return wrapper
     return decorator
 
 
-def confirm_action(prompt: str = None):
-    """
-    Декоратор для запроса подтверждения действия.
-
-    Args:
-        prompt: Сообщение для подтверждения.
-
-    Returns:
-        Декоратор функции.
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Для CLI команд проверяем, есть ли self и является ли он CLI объектом
-            if args and hasattr(args[0], 'user_manager'):
-                # Это команда CLI, пропускаем подтверждение
-                return func(*args, **kwargs)
-
-            # Для остальных случаев - запрашиваем подтверждение
-            if prompt:
-                print(f"\n{prompt}")
-            else:
-                print(f"\nПодтвердите действие: {func.__name__}")
-
-            response = input("Продолжить? (y/n): ").strip().lower()
-
-            if response not in ['y', 'yes', 'да', 'д']:
-                print("Действие отменено.")
-                return None
-
-            return func(*args, **kwargs)
-
-        return wrapper
-    return decorator
+# Специальные декораторы для конкретных действий
+def log_buy(verbose: bool = False):
+    """Декоратор для логирования операций покупки."""
+    return log_action(action_name='BUY', verbose=verbose)
 
 
-def cache_result(ttl_seconds: int = 300):
-    """
-    Декоратор для кэширования результатов функций.
+def log_sell(verbose: bool = False):
+    """Декоратор для логирования операций продажи."""
+    return log_action(action_name='SELL', verbose=verbose)
 
-    Args:
-        ttl_seconds: Время жизни кэша в секундах.
 
-    Returns:
-        Декоратор функции.
-    """
-    def decorator(func: Callable) -> Callable:
-        cache = {}
+def log_register(verbose: bool = False):
+    """Декоратор для логирования регистрации."""
+    return log_action(action_name='REGISTER', verbose=verbose)
 
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Создаем ключ кэша на основе аргументов
-            key = (args, tuple(sorted(kwargs.items())))
 
-            current_time = datetime.now().timestamp()
-
-            # Проверяем, есть ли результат в кэше и не устарел ли он
-            if key in cache:
-                result, timestamp = cache[key]
-                if current_time - timestamp < ttl_seconds:
-                    logging.getLogger(func.__module__).debug(
-                        f"Кэшированный результат для {func.__name__}"
-                    )
-                    return result
-
-            # Выполняем функцию и кэшируем результат
-            result = func(*args, **kwargs)
-            cache[key] = (result, current_time)
-
-            return result
-
-        return wrapper
-    return decorator
+def log_login(verbose: bool = False):
+    """Декоратор для логирования входа."""
+    return log_action(action_name='LOGIN', verbose=verbose)

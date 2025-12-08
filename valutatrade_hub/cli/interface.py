@@ -263,8 +263,8 @@ class TradingCLI(cmd.Cmd):
             return
 
         # Валидация валюты
-        if not InputValidator.validate_currency_code(currency_code):
-            print("❌ Ошибка: некорректный код валюты")
+        if not currency_code or len(currency_code.strip()) < 2:
+            print("❌ Ошибка: код валюты должен содержать минимум 2 символа")
             return
 
         # Валидация суммы
@@ -364,8 +364,8 @@ class TradingCLI(cmd.Cmd):
             return
 
         # Валидация валюты
-        if not InputValidator.validate_currency_code(currency_code):
-            print("❌ Ошибка: некорректный код валюты")
+        if not currency_code or len(currency_code.strip()) < 2:
+            print("❌ Ошибка: код валюты должен содержать минимум 2 символа")
             return
 
         # Валидация суммы

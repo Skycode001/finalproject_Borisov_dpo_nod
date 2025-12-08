@@ -57,17 +57,15 @@ class InputValidator:
     @staticmethod
     def validate_currency_code(currency_code: str) -> bool:
         """
-        Проверяет корректность кода валюты.
-
-        Args:
-            currency_code: Код валюты.
-
-        Returns:
-            True если код корректен, False в противном случае.
+        Проверяет базовую корректность кода валюты.
+        Возвращает True для любых строк 2-5 символов из букв.
+        Не проверяет существование валюты в реестре.
         """
         if not currency_code or not isinstance(currency_code, str):
             return False
-        return currency_code.strip().isalpha() and len(currency_code.strip()) == 3
+        currency_code = currency_code.strip().upper()
+        # Более либеральная проверка: 2-5 символов, только буквы
+        return 2 <= len(currency_code) <= 5 and currency_code.isalpha()
 
     @staticmethod
     def validate_amount(amount: str) -> Optional[float]:

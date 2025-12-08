@@ -2,8 +2,9 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from .exceptions import ApiRequestError, InsufficientFundsError
-from ..infra.settings import settings   # Импорт синглтона настроек
+from ..decorators import log_buy, log_login, log_register, log_sell
+from ..infra.settings import settings
+from .exceptions import ApiRequestError, CurrencyNotFoundError, InsufficientFundsError
 from .models import Portfolio, User
 from .utils import CurrencyService, DataManager, InputValidator
 
@@ -42,6 +43,7 @@ class UserManager:
         users_data = [user.to_dict() for user in self._users]
         return DataManager.save_json(file_path, users_data)
 
+    @log_register(verbose=True)
     def register(self, username: str, password: str) -> Tuple[bool, str]:
         """
         Регистрирует нового пользователя.
@@ -89,6 +91,7 @@ class UserManager:
         except ValueError as e:
             return False, str(e)
 
+    @log_login(verbose=True)
     def login(self, username: str, password: str) -> Tuple[bool, str]:
         """
         Выполняет вход пользователя.
@@ -205,6 +208,7 @@ class PortfolioManager:
 
         return self._portfolios[user_id]
 
+    @log_buy(verbose=True)
     def buy_currency(self, currency_code: str, amount: float) -> Tuple[bool, str]:
         """
         Покупка валюты.
@@ -219,10 +223,6 @@ class PortfolioManager:
         # Проверка авторизации
         if not self._user_manager.is_logged_in:
             return False, "Требуется авторизация"
-
-        # Валидация
-        if not InputValidator.validate_currency_code(currency_code):
-            return False, "Неверный код валюты"
 
         validated_amount = InputValidator.validate_amount(str(amount))
         if validated_amount is None:
@@ -245,6 +245,9 @@ class PortfolioManager:
         service = CurrencyService()
         try:
             rate = service.get_exchange_rate(currency_code, 'USD')
+        except CurrencyNotFoundError as e:
+            # Перебрасываем исключение для логирования в декораторе
+            raise e
         except ApiRequestError:
             return False, f"Ошибка при получении курса для {currency_code}→USD"
 
@@ -294,6 +297,7 @@ class PortfolioManager:
         except ValueError as e:
             return False, str(e)
 
+    @log_sell(verbose=True)
     def sell_currency(self, currency_code: str, amount: float) -> Tuple[bool, str]:
         """
         Продажа валюты.
@@ -308,10 +312,6 @@ class PortfolioManager:
         # Проверка авторизации
         if not self._user_manager.is_logged_in:
             return False, "Требуется авторизация"
-
-        # Валидация
-        if not InputValidator.validate_currency_code(currency_code):
-            return False, "Неверный код валюты"
 
         validated_amount = InputValidator.validate_amount(str(amount))
         if validated_amount is None:
@@ -349,6 +349,9 @@ class PortfolioManager:
         service = CurrencyService()
         try:
             rate = service.get_exchange_rate(currency_code, 'USD')
+        except CurrencyNotFoundError as e:
+            # Перебрасываем исключение для логирования в декораторе
+            raise e
         except ApiRequestError:
             return False, f"Ошибка при получении курса для {currency_code}→USD"
 
