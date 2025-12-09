@@ -2,9 +2,16 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..decorators import log_buy, log_login, log_register, log_sell
+from ..decorators import log_action
 from ..infra.settings import settings
-from .exceptions import ApiRequestError, CurrencyNotFoundError, InsufficientFundsError
+from .currencies import get_currency
+from .exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+    InvalidAmountError,
+    UserNotAuthenticatedError,
+)
 from .models import Portfolio, User
 from .utils import CurrencyService, DataManager, InputValidator
 
@@ -18,7 +25,6 @@ class UserManager:
 
     def _load_users(self) -> List[User]:
         """Загружает пользователей из JSON-файла."""
-        # Использование настроек для получения пути к файлу
         data_dir = settings.get("database.path", "data")
         users_file = settings.get("database.users_file", "users.json")
         file_path = os.path.join(data_dir, users_file)
@@ -35,7 +41,6 @@ class UserManager:
 
     def _save_users(self) -> bool:
         """Сохраняет пользователей в JSON-файл."""
-        # Использование настроек для получения пути к файлу
         data_dir = settings.get("database.path", "data")
         users_file = settings.get("database.users_file", "users.json")
         file_path = os.path.join(data_dir, users_file)
@@ -43,7 +48,7 @@ class UserManager:
         users_data = [user.to_dict() for user in self._users]
         return DataManager.save_json(file_path, users_data)
 
-    @log_register(verbose=True)
+    @log_action(action_name='REGISTER', verbose=True)
     def register(self, username: str, password: str) -> Tuple[bool, str]:
         """
         Регистрирует нового пользователя.
@@ -55,12 +60,9 @@ class UserManager:
         Returns:
             Tuple[bool, str]: (успех, сообщение)
         """
-        # Валидация с использованием настроек
-        min_username_length = 3  # Можно вынести в настройки
-        max_username_length = 20  # Можно вынести в настройки
-
+        # Валидация
         if not InputValidator.validate_username(username):
-            return False, f"Имя пользователя должно содержать {min_username_length}-{max_username_length} буквенно-цифровых символов"
+            return False, "Имя пользователя должно содержать 3-20 буквенно-цифровых символов"
 
         if not InputValidator.validate_password(password):
             return False, "Пароль должен быть не короче 4 символов"
@@ -70,13 +72,15 @@ class UserManager:
             return False, f"Имя пользователя '{username}' уже занято"
 
         try:
-            # Создание нового пользователя
+            # Безопасная операция: чтение → модификация → запись
             user_id = max((user.user_id for user in self._users if user.user_id), default=0) + 1
             new_user = User(username=username, password=password, user_id=user_id)
 
-            # Добавление и сохранение пользователя
             self._users.append(new_user)
+
             if not self._save_users():
+                # Откат изменения в памяти
+                self._users.remove(new_user)
                 return False, "Ошибка при сохранении данных пользователя"
 
             # Создаем пустой портфель для нового пользователя
@@ -91,7 +95,7 @@ class UserManager:
         except ValueError as e:
             return False, str(e)
 
-    @log_login(verbose=True)
+    @log_action(action_name='LOGIN', verbose=True)
     def login(self, username: str, password: str) -> Tuple[bool, str]:
         """
         Выполняет вход пользователя.
@@ -134,6 +138,10 @@ class UserManager:
         """Проверяет, выполнен ли вход."""
         return self._current_user is not None
 
+    def get_user_by_id(self, user_id: int) -> Optional[User]:
+        """Возвращает пользователя по ID."""
+        return next((u for u in self._users if u.user_id == user_id), None)
+
 
 class PortfolioManager:
     """Менеджер для работы с портфелями пользователей."""
@@ -144,7 +152,6 @@ class PortfolioManager:
 
     def _load_portfolios(self) -> Dict[int, Portfolio]:
         """Загружает портфели из JSON-файла."""
-        # Использование настроек для получения пути к файлу
         data_dir = settings.get("database.path", "data")
         portfolios_file = settings.get("database.portfolios_file", "portfolios.json")
         file_path = os.path.join(data_dir, portfolios_file)
@@ -163,7 +170,6 @@ class PortfolioManager:
 
     def _save_portfolios(self) -> bool:
         """Сохраняет портфели в JSON-файл."""
-        # Использование настроек для получения пути к файлу
         data_dir = settings.get("database.path", "data")
         portfolios_file = settings.get("database.portfolios_file", "portfolios.json")
         file_path = os.path.join(data_dir, portfolios_file)
@@ -181,11 +187,14 @@ class PortfolioManager:
         Returns:
             bool: True если успешно создан, False в противном случае.
         """
+        # Безопасная операция с проверкой существования
         if user_id in self._portfolios:
             return True  # Портфель уже существует
 
         portfolio = Portfolio(user_id)
         self._portfolios[user_id] = portfolio
+
+        # Сохраняем изменения
         return self._save_portfolios()
 
     def get_current_portfolio(self) -> Optional[Portfolio]:
@@ -196,11 +205,11 @@ class PortfolioManager:
             Portfolio или None если пользователь не авторизован.
         """
         if not self._user_manager.is_logged_in:
-            return None
+            raise UserNotAuthenticatedError()
 
         user_id = self._user_manager.current_user.user_id
 
-        # Если портфеля нет - создаем (для уже существующих пользователей)
+        # Если портфеля нет - создаем
         if user_id not in self._portfolios:
             portfolio = Portfolio(user_id)
             self._portfolios[user_id] = portfolio
@@ -208,7 +217,7 @@ class PortfolioManager:
 
         return self._portfolios[user_id]
 
-    @log_buy(verbose=True)
+    @log_action(action_name='BUY', verbose=True)
     def buy_currency(self, currency_code: str, amount: float) -> Tuple[bool, str]:
         """
         Покупка валюты.
@@ -219,17 +228,28 @@ class PortfolioManager:
 
         Returns:
             Tuple[bool, str]: (успех, сообщение)
+
+        Raises:
+            UserNotAuthenticatedError: Если пользователь не авторизован.
+            CurrencyNotFoundError: Если валюта не найдена.
+            InvalidAmountError: Если сумма некорректна.
+            ApiRequestError: Если ошибка при получении курса.
         """
         # Проверка авторизации
         if not self._user_manager.is_logged_in:
-            return False, "Требуется авторизация"
+            raise UserNotAuthenticatedError()
 
-        validated_amount = InputValidator.validate_amount(str(amount))
-        if validated_amount is None:
-            return False, "'amount' должен быть положительным числом"
+        # Валидация суммы
+        if amount <= 0:
+            raise InvalidAmountError(f"Сумма покупки должна быть положительной: {amount}")
 
         currency_code = currency_code.upper()
-        amount = validated_amount
+
+        # Валидация валюты через get_currency()
+        try:
+            get_currency(currency_code)  # Проверяем существование валюты
+        except CurrencyNotFoundError as e:
+            raise e
 
         # Проверка минимальной суммы покупки из настроек
         min_trade_amount = settings.get("trading.min_trade_amount", 0.0001)
@@ -241,18 +261,12 @@ class PortfolioManager:
         if not portfolio:
             return False, "Ошибка при получении портфеля"
 
-        # Получаем курс
-        service = CurrencyService()
-        try:
-            rate = service.get_exchange_rate(currency_code, 'USD')
-        except CurrencyNotFoundError as e:
-            # Перебрасываем исключение для логирования в декораторе
-            raise e
-        except ApiRequestError:
-            return False, f"Ошибка при получении курса для {currency_code}→USD"
+        # Получаем курс через RateManager (с TTL кешем)
+        rate_manager = RateManager()
+        success, message, rate, updated_at = rate_manager.get_rate(currency_code, 'USD')
 
-        if not rate:
-            return False, f"Не удалось получить курс для {currency_code}→USD"
+        if not success or rate is None:
+            raise ApiRequestError(f"Не удалось получить курс для {currency_code}→USD: {message}")
 
         # Рассчитываем стоимость в USD
         cost_usd = amount * rate
@@ -264,12 +278,13 @@ class PortfolioManager:
             cost_usd += commission
 
         try:
+            # Безопасная операция: чтение → модификация → запись
             # Проверяем/создаем кошельки
             # USD кошелек (для списания)
             if 'USD' not in portfolio.wallets:
                 portfolio.add_currency('USD')
 
-            # Кошелек покупаемой валюты
+            # Кошелек покупаемой валюты (автосоздание при отсутствии)
             if currency_code not in portfolio.wallets:
                 portfolio.add_currency(currency_code)
 
@@ -287,17 +302,21 @@ class PortfolioManager:
 
             # Сохраняем изменения
             if self._save_portfolios():
-                return True, f"Успешно куплено {amount:.4f} {currency_code}"
+                # Возвращаем оценочную стоимость
+                estimated_cost = amount * rate
+                return True, f"Покупка выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}. Оценочная стоимость: ${estimated_cost:.2f}"
             else:
+                # Откат транзакции в случае ошибки сохранения
+                usd_wallet.deposit(cost_usd)
+                target_wallet.withdraw(amount)
                 return False, "Ошибка при сохранении данных"
 
         except InsufficientFundsError as e:
-            # Перебрасываем исключение дальше для обработки в CLI
             raise e
-        except ValueError as e:
-            return False, str(e)
+        except Exception as e:
+            return False, f"Ошибка при выполнении операции: {str(e)}"
 
-    @log_sell(verbose=True)
+    @log_action(action_name='SELL', verbose=True)
     def sell_currency(self, currency_code: str, amount: float) -> Tuple[bool, str]:
         """
         Продажа валюты.
@@ -308,17 +327,29 @@ class PortfolioManager:
 
         Returns:
             Tuple[bool, str]: (успех, сообщение)
+
+        Raises:
+            UserNotAuthenticatedError: Если пользователь не авторизован.
+            CurrencyNotFoundError: Если валюта не найдена.
+            InvalidAmountError: Если сумма некорректна.
+            InsufficientFundsError: Если недостаточно средств.
+            ApiRequestError: Если ошибка при получении курса.
         """
         # Проверка авторизации
         if not self._user_manager.is_logged_in:
-            return False, "Требуется авторизация"
+            raise UserNotAuthenticatedError()
 
-        validated_amount = InputValidator.validate_amount(str(amount))
-        if validated_amount is None:
-            return False, "'amount' должен быть положительным числом"
+        # Валидация суммы
+        if amount <= 0:
+            raise InvalidAmountError(f"Сумма продажи должна быть положительной: {amount}")
 
         currency_code = currency_code.upper()
-        amount = validated_amount
+
+        # Валидация валюты через get_currency()
+        try:
+            get_currency(currency_code)  # Проверяем существование валюты
+        except CurrencyNotFoundError as e:
+            raise e
 
         # Проверка минимальной суммы продажи из настроек
         min_trade_amount = settings.get("trading.min_trade_amount", 0.0001)
@@ -345,18 +376,12 @@ class PortfolioManager:
         if current_balance < amount:
             raise InsufficientFundsError(current_balance, amount, currency_code)
 
-        # Получаем курс
-        service = CurrencyService()
-        try:
-            rate = service.get_exchange_rate(currency_code, 'USD')
-        except CurrencyNotFoundError as e:
-            # Перебрасываем исключение для логирования в декораторе
-            raise e
-        except ApiRequestError:
-            return False, f"Ошибка при получении курса для {currency_code}→USD"
+        # Получаем курс через RateManager (с TTL кешем)
+        rate_manager = RateManager()
+        success, message, rate, updated_at = rate_manager.get_rate(currency_code, 'USD')
 
-        if not rate:
-            return False, f"Не удалось получить курс для {currency_code}→USD"
+        if not success or rate is None:
+            raise ApiRequestError(f"Не удалось получить курс для {currency_code}→USD: {message}")
 
         # Рассчитываем выручку в USD
         revenue_usd = amount * rate
@@ -368,6 +393,7 @@ class PortfolioManager:
             revenue_usd -= commission
 
         try:
+            # Безопасная операция: чтение → модификация → запись
             # Проверяем/создаем USD кошелек (для зачисления)
             if 'USD' not in portfolio.wallets:
                 portfolio.add_currency('USD')
@@ -376,20 +402,24 @@ class PortfolioManager:
             usd_wallet = portfolio.get_wallet('USD')
 
             # Выполняем транзакцию
-            source_wallet.withdraw(amount)  # Может выбросить InsufficientFundsError
+            source_wallet.withdraw(amount)
             usd_wallet.deposit(revenue_usd)
 
             # Сохраняем изменения
             if self._save_portfolios():
-                return True, f"Успешно продано {amount:.4f} {currency_code}"
+                # Возвращаем оценочную выручку
+                estimated_revenue = amount * rate
+                return True, f"Продажа выполнена: {amount:.4f} {currency_code} по курсу {rate:.2f} USD/{currency_code}. Оценочная выручка: ${estimated_revenue:.2f}"
             else:
+                # Откат транзакции в случае ошибки сохранения
+                source_wallet.deposit(amount)
+                usd_wallet.withdraw(revenue_usd)
                 return False, "Ошибка при сохранении данных"
 
         except InsufficientFundsError as e:
-            # Перебрасываем исключение дальше для обработки в CLI
             raise e
-        except ValueError as e:
-            return False, str(e)
+        except Exception as e:
+            return False, f"Ошибка при выполнении операции: {str(e)}"
 
     def show_portfolio(self, base_currency: str = 'USD') -> Tuple[bool, str, Optional[Dict]]:
         """
@@ -449,21 +479,16 @@ class PortfolioManager:
 
 
 class RateManager:
-    """Менеджер для работы с курсами валют."""
+    """Менеджер для работы с курсами валют с TTL кешем."""
 
     def __init__(self):
         self._rates_data = self._load_rates()
-        # Использование настроек для TTL кеша курсов
+        # Использование TTL из SettingsLoader
         cache_minutes = settings.get("api.rates_cache_duration_minutes", 5)
         self._CACHE_DURATION = timedelta(minutes=cache_minutes)
 
-        # Настройки API из конфигурации
-        self._max_retries = settings.get("api.max_retries", 3)
-        self._timeout_seconds = settings.get("api.timeout_seconds", 10)
-
     def _load_rates(self) -> Dict:
         """Загружает курсы из JSON-файла."""
-        # Использование настроек для получения пути к файлу
         data_dir = settings.get("database.path", "data")
         rates_file = settings.get("database.rates_file", "rates.json")
         file_path = os.path.join(data_dir, rates_file)
@@ -481,7 +506,6 @@ class RateManager:
 
     def _save_rates(self) -> bool:
         """Сохраняет курсы в JSON-файл."""
-        # Использование настроек для получения пути к файлу
         data_dir = settings.get("database.path", "data")
         rates_file = settings.get("database.rates_file", "rates.json")
         file_path = os.path.join(data_dir, rates_file)
@@ -489,7 +513,7 @@ class RateManager:
         return DataManager.save_json(file_path, self._rates_data)
 
     def _is_rate_fresh(self, rate_data: Dict) -> bool:
-        """Проверяет свежесть курса."""
+        """Проверяет свежесть курса по TTL из настроек."""
         if not rate_data or "updated_at" not in rate_data:
             return False
 
@@ -501,7 +525,6 @@ class RateManager:
 
     def _get_rate_from_cache(self, from_currency: str, to_currency: str) -> Tuple[Optional[float], Optional[str]]:
         """Получает курс из кеша."""
-        # Формируем ключ в формате EUR_USD
         pair_key = f"{from_currency}_{to_currency}"
 
         if pair_key in self._rates_data:
@@ -521,13 +544,17 @@ class RateManager:
 
         Returns:
             Tuple[bool, str, Optional[float], Optional[str]]: (успех, сообщение, курс, время обновления)
-        """
-        # Валидация
-        if not InputValidator.validate_currency_code(from_currency):
-            return False, f"Неверный код исходной валюты '{from_currency}'", None, None
 
-        if not InputValidator.validate_currency_code(to_currency):
-            return False, f"Неверный код целевой валюты '{to_currency}'", None, None
+        Raises:
+            CurrencyNotFoundError: Если валюта не найдена.
+            ApiRequestError: Если не удалось обновить курс.
+        """
+        # Валидация валют через get_currency()
+        try:
+            get_currency(from_currency)  # Проверяем исходную валюту
+            get_currency(to_currency)    # Проверяем целевую валюту
+        except CurrencyNotFoundError as e:
+            raise e
 
         from_currency = from_currency.upper()
         to_currency = to_currency.upper()
@@ -539,9 +566,12 @@ class RateManager:
             return True, f"Курс {from_currency}→{to_currency}", rate, updated_at
 
         # Если курс устарел или отсутствует, обновляем
-        success, message = self.update_rates()
-        if not success:
-            return False, f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже.", None, None
+        try:
+            success = self.update_rates()
+            if not success:
+                raise ApiRequestError("Не удалось обновить курсы валют")
+        except ApiRequestError as e:
+            raise e
 
         # Пробуем снова после обновления
         rate, updated_at = self._get_rate_from_cache(from_currency, to_currency)
@@ -550,7 +580,7 @@ class RateManager:
             return True, f"Курс {from_currency}→{to_currency}", rate, updated_at
 
         # Если курс не найден даже после обновления
-        return False, f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже.", None, None
+        raise ApiRequestError(f"Курс {from_currency}→{to_currency} недоступен")
 
     def get_all_rates(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -561,20 +591,35 @@ class RateManager:
         """
         return self._rates_data.copy()
 
-    def update_rates(self) -> Tuple[bool, str]:
+    def update_rates(self) -> bool:
         """
         Обновляет курсы валют.
 
         Returns:
-            Tuple[bool, str]: (успех, сообщение)
+            bool: True если успешно, False в противном случае.
+
+        Raises:
+            ApiRequestError: Если произошла ошибка при обновлении.
         """
         try:
-            self._rates_data = CurrencyService.get_all_rates()
+            # Безопасная операция: чтение → модификация → запись
+            old_rates = self._rates_data.copy()
+
+            # Получаем новые курсы
+            new_rates = CurrencyService.get_all_rates()
+
+            # Обновляем данные
+            self._rates_data.update(new_rates)
+
+            # Сохраняем
             if self._save_rates():
-                return True, "Курсы успешно обновлены"
+                return True
             else:
-                return False, "Ошибка при сохранении курсов"
+                # Откат в случае ошибки сохранения
+                self._rates_data = old_rates
+                raise ApiRequestError("Ошибка сохранения курсов")
+
         except ApiRequestError as e:
-            return False, f"Ошибка при обновлении курсов: {str(e)}"
+            raise e
         except Exception as e:
-            return False, f"Неожиданная ошибка при обновлении курсов: {str(e)}"
+            raise ApiRequestError(f"Неожиданная ошибка: {str(e)}") from e
