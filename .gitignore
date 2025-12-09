@@ -51,3 +51,15 @@ poetry.lock
 # Логи
 logs/
 *.log
+
+# Файлы Parser Service (кеш и исторические данные не коммитятся)
+data/exchange_rates.json
+data/rates.json
+data/exchange_rates.json.backup*
+data/rates.json.backup*
+data/exchange_rates.json.corrupted*
+data/rates.json.corrupted*
+
+# Файлы пользователей и портфелей (для разработки можно коммитить тестовые)
+# data/users.json
+# data/portfolios.json

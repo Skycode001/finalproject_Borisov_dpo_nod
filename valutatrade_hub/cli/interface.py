@@ -528,7 +528,7 @@ class TradingCLI(cmd.Cmd):
             status = updater.get_update_status()
 
             print(f"   • Последнее обновление: {status['last_update'] or 'никогда'}")
-            print(f"   • Всего валют в кеше: {status['total_currencies']}")
+            print(f"   • Всего валют в кеше: {status['latest_currencies']}")
             # Показываем первые 10 валют
             currencies = status['currencies']
             if currencies:
@@ -539,29 +539,28 @@ class TradingCLI(cmd.Cmd):
             else:
                 print("   • Доступные валюты: нет данных")
             print(f"   • Источники данных: {', '.join(status['sources'])}")
+            print(f"   • Всего исторических записей: {status['total_records']}")
+            print(f"   • Формат данных: {status['formats']['exchange_rates']}")
             # Проверить файлы
             import os
             print("\n📁 Файлы данных:")
             print(f"   • data/rates.json: {'✅ существует' if os.path.exists('data/rates.json') else '❌ отсутствует'}")
             print(f"   • data/exchange_rates.json: {'✅ существует' if os.path.exists('data/exchange_rates.json') else '❌ отсутствует'}")
             # Показать информацию о файлах
-            if os.path.exists('data/rates.json'):
+            if os.path.exists('data/exchange_rates.json'):
                 import json
-                from datetime import datetime
 
                 try:
-                    with open('data/rates.json', 'r', encoding='utf-8') as f:
+                    with open('data/exchange_rates.json', 'r', encoding='utf-8') as f:
                         rates_data = json.load(f)
 
-                    if 'last_refresh' in rates_data:
-                        try:
-                            dt = datetime.fromisoformat(rates_data['last_refresh'].replace('Z', '+00:00'))
-                            print(f"   • Время последнего обновления: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
-                        except (ValueError, TypeError):
-                            print(f"   • Время последнего обновления: {rates_data['last_refresh']}")
-
-                    if 'source' in rates_data:
-                        print(f"   • Источник данных: {rates_data['source']}")
+                    if isinstance(rates_data, dict):
+                        print("   • Формат: новый (с уникальными ID)")
+                        print(f"   • Всего записей: {len(rates_data)}")
+                        # Показать пример записи
+                        if rates_data:
+                            first_key = next(iter(rates_data))
+                            print(f"   • Пример ID записи: {first_key[:50]}...")
 
                 except Exception as e:
                     print(f"   • Ошибка чтения файла: {e}")
@@ -577,6 +576,152 @@ class TradingCLI(cmd.Cmd):
     def do_quit(self, arg: str) -> None:
         """Алиас для exit"""
         return self.do_exit(arg)
+
+    # ===== НОВЫЕ КОМАНДЫ ДЛЯ ИСТОРИЧЕСКИХ ДАННЫХ =====
+
+    def do_exchangestats(self, _: str) -> None:
+        """
+        Показать статистику по историческим данным в новом формате.
+        Команда: exchange-stats
+        """
+        print("📊 Статистика исторических данных (новый формат):")
+        try:
+            from ..parser_service.updater import RatesUpdater
+
+            updater = RatesUpdater()
+            stats = updater.get_historical_stats()
+
+            if "message" in stats:
+                print(f"   ℹ️ {stats['message']}")
+                return
+
+            print(f"   • Всего записей: {stats['total_records']}")
+            print(f"   • Уникальных валют: {stats['unique_currencies']}")
+
+            if stats.get('currency_stats'):
+                print("\n   📈 Статистика по валютам:")
+                for currency, currency_stats in stats['currency_stats'].items():
+                    print(f"      {currency}:")
+                    print(f"        • Записей: {currency_stats['record_count']}")
+                    print(f"        • Минимум: {currency_stats['min_rate']:.2f}")
+                    print(f"        • Максимум: {currency_stats['max_rate']:.2f}")
+                    print(f"        • Среднее: {currency_stats['avg_rate']:.2f}")
+                    print(f"        • Источники: {', '.join(currency_stats['sources'])}")
+
+        except Exception as e:
+            print(f"❌ Ошибка при получении статистики: {e}")
+
+    def do_viewhistory(self, arg: str) -> None:
+        """
+        Показать историю курсов для валюты.
+        Использование: view-history --currency <code> [--limit N]
+        Пример: view-history --currency BTC --limit 5
+        """
+        args = shlex.split(arg)
+        currency = None
+        limit = 10
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--currency" and i + 1 < len(args):
+                currency = args[i + 1].upper()
+                i += 2
+            elif args[i] == "--limit" and i + 1 < len(args):
+                try:
+                    limit = int(args[i + 1])
+                    i += 2
+                except ValueError:
+                    print("❌ Ошибка: limit должен быть числом")
+                    return
+            else:
+                print("❌ Ошибка: неверный формат команды")
+                print("Использование: view-history --currency <code> [--limit N]")
+                print("Пример: view-history --currency BTC --limit 5")
+                return
+
+        if not currency:
+            print("❌ Ошибка: требуется аргумент --currency")
+            return
+
+        print(f"📅 История курса {currency}→USD (последние {limit} записей):")
+
+        try:
+            from ..parser_service.storage import ExchangeRatesStorage
+
+            storage = ExchangeRatesStorage()
+            history = storage.get_rate_history(currency, "USD", limit)
+
+            if not history:
+                print(f"   ℹ️ Нет исторических данных для {currency}")
+                return
+
+            table = PrettyTable()
+            table.field_names = ["Время", "Курс", "Источник", "ID"]
+            table.align["Время"] = "l"
+            table.align["Курс"] = "r"
+            table.align["Источник"] = "l"
+            table.align["ID"] = "l"
+
+            for record in history:
+                # Обрезаем ID для лучшего отображения
+                short_id = record['id'][:20] + "..." if len(record['id']) > 20 else record['id']
+                # Форматируем время
+                timestamp = record['timestamp']
+                if 'T' in timestamp:
+                    time_part = timestamp.split('T')[1].split('.')[0]
+                    date_part = timestamp.split('T')[0]
+                    display_time = f"{date_part} {time_part}"
+                else:
+                    display_time = timestamp
+                table.add_row([
+                    display_time,
+                    f"{record['rate']:.6f}" if record['rate'] < 1 else f"{record['rate']:.2f}",
+                    record['source'],
+                    short_id
+                ])
+
+            print(table)
+            print(f"   Всего записей: {len(history)}")
+
+        except Exception as e:
+            print(f"❌ Ошибка при получении истории: {e}")
+
+    def do_cleanuphistory(self, arg: str) -> None:
+        """
+        Очистить старые записи из истории.
+        Использование: cleanup-history [--days N]
+        Пример: cleanup-history --days 30
+        """
+        args = shlex.split(arg)
+        days = 30
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--days" and i + 1 < len(args):
+                try:
+                    days = int(args[i + 1])
+                    i += 2
+                except ValueError:
+                    print("❌ Ошибка: days должен быть числом")
+                    return
+            else:
+                print("❌ Ошибка: неверный формат команды")
+                print("Использование: cleanup-history [--days N]")
+                print("Пример: cleanup-history --days 30")
+                return
+
+        print(f"🧹 Очистка исторических данных старше {days} дней...")
+
+        try:
+            from ..parser_service.storage import ExchangeRatesStorage
+
+            storage = ExchangeRatesStorage()
+            deleted_count = storage.cleanup_old_records(days)
+
+            print(f"✅ Удалено {deleted_count} старых записей")
+
+        except Exception as e:
+            print(f"❌ Ошибка при очистке истории: {e}")
 
     # ===== Вспомогательные команды =====
 
@@ -741,6 +886,17 @@ class TradingCLI(cmd.Cmd):
         # Если команда parser-status
         elif line.startswith('parser-status'):
             self.do_parser_status("")
+        # Если команда exchange-stats
+        elif line.startswith('exchange-stats'):
+            self.do_exchangestats("")
+        # Если команда view-history
+        elif line.startswith('view-history'):
+            new_line = line.replace('view-history', 'viewhistory', 1)
+            self.onecmd(new_line)
+        # Если команда cleanup-history
+        elif line.startswith('cleanup-history'):
+            new_line = line.replace('cleanup-history', 'cleanuphistory', 1)
+            self.onecmd(new_line)
         else:
             print(f"❌ Неизвестная команда: {line}")
             print("   Введите 'help' для списка доступных команд")
@@ -778,6 +934,9 @@ class TradingCLI(cmd.Cmd):
                 ("update-all", "Обновить все курсы (Parser Service)", "update-all", "-"),
                 ("parser-test", "Тест Parser Service", "parser-test", "-"),
                 ("parser-status", "Статус Parser Service", "parser-status", "-"),
+                ("exchange-stats", "Статистика исторических данных", "exchange-stats", "-"),
+                ("view-history", "История курса валюты", "view-history --currency BTC --limit 5", "-"),
+                ("cleanup-history", "Очистка старых записей", "cleanup-history --days 30", "-"),
                 ("view-logs", "Просмотр логов", "view-logs --lines 10", "-"),
                 ("exit/quit", "Выход из приложения", "exit", "-"),
                 ("help", "Показать эту справку", "help", "-"),
@@ -800,6 +959,8 @@ class TradingCLI(cmd.Cmd):
             print("  • Логи операций сохраняются в папке logs/")
             print("  • Parser Service использует CoinGecko API для криптовалют")
             print("  • Для фиатных валют используется заглушка (пока)")
+            print("  • Новый формат exchange_rates.json хранит историю с уникальными ID")
+            print("  • Используйте cleanup-history для удаления старых записей")
 
 
 def run_cli() -> None:
