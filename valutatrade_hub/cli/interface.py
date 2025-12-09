@@ -285,7 +285,6 @@ class TradingCLI(cmd.Cmd):
                         print(f"✅ {line}")
                     else:
                         print(f"   {line}")
-
                 # Дополнительная информация
                 print("   📈 Операция записана в журнал действий")
             else:
@@ -357,7 +356,6 @@ class TradingCLI(cmd.Cmd):
                         print(f"✅ {line}")
                     else:
                         print(f"   {line}")
-
                 # Дополнительная информация
                 print("   📈 Операция записана в журнал действий")
             else:
@@ -428,7 +426,6 @@ class TradingCLI(cmd.Cmd):
                 if rate != 0:
                     reverse_rate = 1 / rate
                     print(f"   🔄 Обратный курс {to_currency}→{from_currency}: {reverse_rate:.2f}")
-
                 # Показываем источник данных
                 print(f"   📊 Источник: {self.rate_manager._rates_data.get('source', 'локальный кеш')}")
             else:
@@ -438,15 +435,139 @@ class TradingCLI(cmd.Cmd):
             print(f"❌ {str(e)}")
             print("   Используйте команду 'list-currencies' для просмотра доступных валют")
             print("   Проверьте правильность написания кода валюты (например, USD, EUR, BTC)")
-
         except ApiRequestError as e:
             print(f"❌ {str(e)}")
             print("   Сервис курсов валют временно недоступен")
             print("   Попробуйте снова через несколько минут")
             print("   Используется кешированное значение (если доступно)")
-
         except Exception as e:
             print(f"❌ Непредвиденная ошибка: {e}")
+
+    # ===== КОМАНДЫ ДЛЯ ТЕСТИРОВАНИЯ PARSER SERVICE =====
+
+    def do_parser_test(self, _: str) -> None:
+        """
+        Тестирование Parser Service: получение курсов от CoinGecko.
+        Команда: parser-test
+        """
+        print("🔧 Тестирование Parser Service...")
+        try:
+            # Импортируем компоненты Parser Service
+            from ..parser_service.api_clients import CoinGeckoClient
+            from ..parser_service.updater import RatesUpdater
+
+            print("1. Тестирование CoinGeckoClient...")
+            client = CoinGeckoClient()
+
+            try:
+                rates = client.get_crypto_rates()
+                print(f"✅ Получено {len(rates)} курсов криптовалют:")
+                for currency, info in rates.items():
+                    print(f"   • {currency}: ${info['rate']:.2f} (источник: {info['source']})")
+
+                print("\n2. Тестирование RatesUpdater...")
+                updater = RatesUpdater()
+                all_rates = updater.update_all_rates()
+
+                print(f"✅ Обновление завершено. Всего валют: {len(all_rates)}")
+                # Показать статус
+                status = updater.get_update_status()
+                print("📊 Статус обновления:")
+                print(f"   • Последнее обновление: {status['last_update']}")
+                print(f"   • Всего валют: {status['total_currencies']}")
+                print(f"   • Источники: {', '.join(status['sources'])}")
+
+            except Exception as e:
+                print(f"❌ Ошибка при тестировании: {e}")
+                print("   Проверьте подключение к интернету и доступность CoinGecko API")
+
+        except ImportError as e:
+            print(f"❌ Ошибка импорта Parser Service: {e}")
+            print("   Убедитесь, что файлы Parser Service созданы в valutatrade_hub/parser_service/")
+
+    def do_update_all(self, _: str) -> None:
+        """
+        Обновить все курсы валют через Parser Service.
+        Команда: update-all
+        """
+        print("🔄 Обновление всех курсов через Parser Service...")
+        try:
+            from ..parser_service.updater import RatesUpdater
+
+            updater = RatesUpdater()
+            result = updater.update_all_rates()
+
+            print("✅ Обновление завершено!")
+            print(f"   • Обновлено валют: {len(result)}")
+            # Фильтруем криптовалюты и фиатные
+            crypto_currencies = ['BTC', 'ETH', 'LTC', 'XRP', 'ADA', 'SOL', 'DOT']
+            fiat_currencies = ['USD', 'EUR', 'GBP', 'RUB', 'JPY', 'CHF']
+
+            crypto_list = [c for c in result.keys() if c in crypto_currencies]
+            fiat_list = [c for c in result.keys() if c in fiat_currencies]
+
+            print(f"   • Криптовалюты: {crypto_list}")
+            print(f"   • Фиатные валюты: {fiat_list}")
+            print("\n💡 Теперь используйте команды:")
+            print("   • getrate --from BTC --to USD  (проверить обновленный курс)")
+            print("   • showportfolio                (если есть портфель)")
+
+        except Exception as e:
+            print(f"❌ Ошибка при обновлении: {e}")
+
+    def do_parser_status(self, _: str) -> None:
+        """
+        Показать статус Parser Service.
+        Команда: parser-status
+        """
+        print("📊 Статус Parser Service:")
+        try:
+            from ..parser_service.updater import RatesUpdater
+
+            updater = RatesUpdater()
+            status = updater.get_update_status()
+
+            print(f"   • Последнее обновление: {status['last_update'] or 'никогда'}")
+            print(f"   • Всего валют в кеше: {status['total_currencies']}")
+            # Показываем первые 10 валют
+            currencies = status['currencies']
+            if currencies:
+                display = ', '.join(currencies[:10])
+                if len(currencies) > 10:
+                    display += f'... (еще {len(currencies) - 10})'
+                print(f"   • Доступные валюты: {display}")
+            else:
+                print("   • Доступные валюты: нет данных")
+            print(f"   • Источники данных: {', '.join(status['sources'])}")
+            # Проверить файлы
+            import os
+            print("\n📁 Файлы данных:")
+            print(f"   • data/rates.json: {'✅ существует' if os.path.exists('data/rates.json') else '❌ отсутствует'}")
+            print(f"   • data/exchange_rates.json: {'✅ существует' if os.path.exists('data/exchange_rates.json') else '❌ отсутствует'}")
+            # Показать информацию о файлах
+            if os.path.exists('data/rates.json'):
+                import json
+                from datetime import datetime
+
+                try:
+                    with open('data/rates.json', 'r', encoding='utf-8') as f:
+                        rates_data = json.load(f)
+
+                    if 'last_refresh' in rates_data:
+                        try:
+                            dt = datetime.fromisoformat(rates_data['last_refresh'].replace('Z', '+00:00'))
+                            print(f"   • Время последнего обновления: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                        except (ValueError, TypeError):
+                            print(f"   • Время последнего обновления: {rates_data['last_refresh']}")
+
+                    if 'source' in rates_data:
+                        print(f"   • Источник данных: {rates_data['source']}")
+
+                except Exception as e:
+                    print(f"   • Ошибка чтения файла: {e}")
+
+        except Exception as e:
+            print(f"❌ Ошибка при получении статуса: {e}")
 
     def do_exit(self, _: str) -> None:
         """Выйти из приложения: exit"""
@@ -494,7 +615,6 @@ class TradingCLI(cmd.Cmd):
                 return
 
             print("📋 Доступные валюты:")
-
             table = PrettyTable()
             table.field_names = ["Код", "Название", "Тип", "Доп. информация"]
             table.align["Код"] = "l"
@@ -504,12 +624,10 @@ class TradingCLI(cmd.Cmd):
 
             for code, currency in currencies.items():
                 currency_type = "FIAT" if "FIAT" in currency.get_display_info() else "CRYPTO"
-
                 if currency_type == "FIAT":
                     info = f"Страна: {currency.issuing_country}"
                 else:
                     info = f"Алгоритм: {currency.algorithm}"
-
                 table.add_row([code, currency.name, currency_type, info])
 
             print(table)
@@ -528,7 +646,6 @@ class TradingCLI(cmd.Cmd):
 
             if success:
                 print(f"✅ {message}")
-
                 # Показываем информацию о последнем обновлении
                 if "last_refresh" in self.rate_manager._rates_data:
                     last_refresh = self.rate_manager._rates_data["last_refresh"]
@@ -538,7 +655,6 @@ class TradingCLI(cmd.Cmd):
                         print(f"   📅 Время обновления: {time_str}")
                     except (ValueError, TypeError):
                         pass
-
                 print(f"   📊 Источник: {self.rate_manager._rates_data.get('source', 'неизвестен')}")
             else:
                 print(f"❌ {message}")
@@ -616,6 +732,15 @@ class TradingCLI(cmd.Cmd):
         elif line.startswith('view-logs'):
             new_line = line.replace('view-logs', 'viewlogs', 1)
             self.onecmd(new_line)
+        # Если команда parser-test
+        elif line.startswith('parser-test'):
+            self.do_parser_test("")
+        # Если команда update-all
+        elif line.startswith('update-all'):
+            self.do_update_all("")
+        # Если команда parser-status
+        elif line.startswith('parser-status'):
+            self.do_parser_status("")
         else:
             print(f"❌ Неизвестная команда: {line}")
             print("   Введите 'help' для списка доступных команд")
@@ -649,7 +774,10 @@ class TradingCLI(cmd.Cmd):
                 ("sell", "Продать валюту", "sell --currency BTC --amount 0.01", "InsufficientFundsError, CurrencyNotFoundError, ApiRequestError, InvalidAmountError"),
                 ("getrate", "Получить курс валюты", "getrate --from USD --to BTC", "CurrencyNotFoundError, ApiRequestError"),
                 ("list-currencies", "Список валют", "list-currencies", "-"),
-                ("update-rates", "Обновить курсы", "update-rates", "ApiRequestError"),
+                ("update-rates", "Обновить курсы (старое)", "update-rates", "ApiRequestError"),
+                ("update-all", "Обновить все курсы (Parser Service)", "update-all", "-"),
+                ("parser-test", "Тест Parser Service", "parser-test", "-"),
+                ("parser-status", "Статус Parser Service", "parser-status", "-"),
                 ("view-logs", "Просмотр логов", "view-logs --lines 10", "-"),
                 ("exit/quit", "Выход из приложения", "exit", "-"),
                 ("help", "Показать эту справку", "help", "-"),
@@ -666,11 +794,12 @@ class TradingCLI(cmd.Cmd):
             print("  • ApiRequestError - ошибка внешнего API")
             print("  • InvalidAmountError - некорректная сумма")
             print("  • UserNotAuthenticatedError - требуется авторизация")
-
             print("\n💡 Подсказки:")
             print("  • Используйте list-currencies для просмотра доступных валют")
             print("  • При ошибке ApiRequestError проверьте подключение к сети")
             print("  • Логи операций сохраняются в папке logs/")
+            print("  • Parser Service использует CoinGecko API для криптовалют")
+            print("  • Для фиатных валют используется заглушка (пока)")
 
 
 def run_cli() -> None:
