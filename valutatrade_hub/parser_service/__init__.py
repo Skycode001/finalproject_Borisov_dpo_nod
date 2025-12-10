@@ -2,15 +2,15 @@
 Parser Service - микросервис для получения и обновления курсов валют.
 """
 
-from .api_clients import ApiError, CoinGeckoClient, ExchangeRateClient
-from .config import (  # <-- ИЗМЕНЕНИЕ: удалите старые константы
-    ParserConfig,
-    config,
-    reload_config,
-)
+from .api_clients import CoinGeckoClient, ExchangeRateApiClient
+from .config import ParserConfig, config, reload_config
 from .scheduler import RatesScheduler
 from .storage import ExchangeRatesStorage
 from .updater import RatesUpdater
+
+# Алиасы для обратной совместимости
+ExchangeRateClient = ExchangeRateApiClient
+ApiError = Exception  # Для обратной совместимости
 
 __all__ = [
     # Конфигурация
@@ -20,7 +20,8 @@ __all__ = [
 
     # API клиенты
     'CoinGeckoClient',
-    'ExchangeRateClient',
+    'ExchangeRateApiClient',
+    'ExchangeRateClient',  # Алиас для обратной совместимости
     'ApiError',
 
     # Хранилище

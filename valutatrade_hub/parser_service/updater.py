@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import Dict, Optional
 
 from ..logging_config import get_logger
-from .api_clients import CoinGeckoClient, ExchangeRateClient
-from .config import config  # <-- ИЗМЕНЕНИЕ: импортируем config
+from .api_clients import CoinGeckoClient, ExchangeRateApiClient  # <-- ИЗМЕНЕНИЕ
+from .config import config
 from .storage import ExchangeRatesStorage
 
 logger = get_logger(__name__)
@@ -19,7 +19,7 @@ class RatesUpdater:
 
     def __init__(self):
         self.coingecko_client = CoinGeckoClient()
-        self.exchangerate_client = ExchangeRateClient()
+        self.exchangerate_client = ExchangeRateApiClient()  # <-- ИЗМЕНЕНИЕ: ExchangeRateApiClient вместо ExchangeRateClient
         self.storage = ExchangeRatesStorage()
         self.last_update_time: Optional[datetime] = None
 
@@ -51,7 +51,7 @@ class RatesUpdater:
                 try:
                     record = self.storage.create_exchange_rate_record(
                         from_currency=currency,
-                        to_currency=config.BASE_CURRENCY,  # <-- ИЗМЕНЕНИЕ: используем config
+                        to_currency=config.BASE_CURRENCY,
                         rate=rate_info["rate"],
                         source=rate_info.get("source", "CoinGecko"),
                         meta={
@@ -84,7 +84,7 @@ class RatesUpdater:
                 try:
                     record = self.storage.create_exchange_rate_record(
                         from_currency=currency,
-                        to_currency=config.BASE_CURRENCY,  # <-- ИЗМЕНЕНИЕ: используем config
+                        to_currency=config.BASE_CURRENCY,
                         rate=rate_info["rate"],
                         source=rate_info.get("source", "ExchangeRate-API"),
                         meta={
@@ -108,15 +108,15 @@ class RatesUpdater:
 
             # 3. Добавляем USD как базовую валюту
             usd_record = self.storage.create_exchange_rate_record(
-                from_currency=config.BASE_CURRENCY,  # <-- ИЗМЕНЕНИЕ: используем config
-                to_currency=config.BASE_CURRENCY,    # <-- ИЗМЕНЕНИЕ: используем config
+                from_currency=config.BASE_CURRENCY,
+                to_currency=config.BASE_CURRENCY,
                 rate=1.0,
                 source="System",
                 meta={"note": "Базовая валюта"}
             )
 
             if self.storage.save_exchange_rate_record(usd_record):
-                all_rates[config.BASE_CURRENCY] = {  # <-- ИЗМЕНЕНИЕ: используем config
+                all_rates[config.BASE_CURRENCY] = {
                     "rate": 1.0,
                     "timestamp": update_start.isoformat() + "Z",
                     "source": "System"
@@ -154,7 +154,7 @@ class RatesUpdater:
     def _get_crypto_rates(self) -> Dict:
         """Получает курсы криптовалют с метаданными."""
         try:
-            # Предполагаем, что CoinGeckoClient теперь возвращает метаданные
+            # Используем старый метод для обратной совместимости
             rates = self.coingecko_client.get_crypto_rates()
 
             # Добавляем временную метку для каждой записи
@@ -170,6 +170,7 @@ class RatesUpdater:
     def _get_fiat_rates(self) -> Dict:
         """Получает курсы фиатных валют с метаданными."""
         try:
+            # Используем старый метод для обратной совместимости
             rates = self.exchangerate_client.get_fiat_rates()
 
             # Добавляем временную метку для каждой записи
