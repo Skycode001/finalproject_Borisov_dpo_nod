@@ -4,10 +4,10 @@
 
 import threading
 import time
-from typing import Dict  # Добавляем импорт
+from typing import Dict
 
 from ..logging_config import get_logger
-from .config import UPDATE_INTERVAL
+from .config import config  # <-- ИЗМЕНЕНИЕ: импортируем config
 from .updater import RatesUpdater
 
 logger = get_logger(__name__)
@@ -18,7 +18,7 @@ class RatesScheduler:
 
     def __init__(self):
         self.updater = RatesUpdater()
-        self.update_interval = UPDATE_INTERVAL
+        self.update_interval = config.UPDATE_INTERVAL  # <-- ИЗМЕНЕНИЕ: используем config
         self._scheduler_thread = None
         self._stop_event = threading.Event()
         self.is_running = False
@@ -89,7 +89,7 @@ class RatesScheduler:
         except Exception as e:
             logger.error(f"Ошибка при запланированном обновлении: {e}")
 
-    def get_status(self) -> Dict:  # Теперь Dict импортирован
+    def get_status(self) -> Dict:
         """
         Возвращает статус планировщика.
 

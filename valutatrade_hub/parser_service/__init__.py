@@ -3,12 +3,10 @@ Parser Service - микросервис для получения и обнов�
 """
 
 from .api_clients import ApiError, CoinGeckoClient, ExchangeRateClient
-from .config import (
-    CRYPTO_CURRENCIES,
-    EXCHANGE_RATES_FILE,
-    FIAT_CURRENCIES,
-    RATES_CACHE_FILE,
-    UPDATE_INTERVAL,
+from .config import (  # <-- ИЗМЕНЕНИЕ: удалите старые константы
+    ParserConfig,
+    config,
+    reload_config,
 )
 from .scheduler import RatesScheduler
 from .storage import ExchangeRatesStorage
@@ -16,11 +14,9 @@ from .updater import RatesUpdater
 
 __all__ = [
     # Конфигурация
-    'EXCHANGE_RATES_FILE',
-    'RATES_CACHE_FILE',
-    'UPDATE_INTERVAL',
-    'FIAT_CURRENCIES',
-    'CRYPTO_CURRENCIES',
+    'config',
+    'ParserConfig',
+    'reload_config',
 
     # API клиенты
     'CoinGeckoClient',

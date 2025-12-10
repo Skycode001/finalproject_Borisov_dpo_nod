@@ -1,6 +1,5 @@
 """
 Модуль для работы с внешними API (CoinGecko и ExchangeRate-API).
-Использует только стандартные библиотеки Python.
 """
 
 import json
@@ -12,16 +11,7 @@ from typing import Dict, Optional
 from urllib.parse import urlencode
 
 from ..logging_config import get_logger
-from .config import (
-    COINGECKO_API_URL,
-    COINGECKO_TIMEOUT,
-    CRYPTO_CURRENCIES,
-    EXCHANGERATE_API_KEY,
-    EXCHANGERATE_API_URL,
-    FIAT_CURRENCIES,
-    MAX_RETRIES,
-    RETRY_DELAY,
-)
+from .config import config
 
 logger = get_logger(__name__)
 
@@ -42,16 +32,17 @@ class NetworkError(ApiError):
 
 
 class CoinGeckoClient:
-    """Клиент для работы с CoinGecko API (использует только стандартные библиотеки)."""
+    """Клиент для работы с CoinGecko API."""
 
     def __init__(self):
-        self.base_url = COINGECKO_API_URL
-        self.timeout = COINGECKO_TIMEOUT
+        self.base_url = config.COINGECKO_URL
+        self.timeout = config.COINGECKO_TIMEOUT
+        self.max_retries = config.MAX_RETRIES
+        self.retry_delay = config.RETRY_DELAY
 
     def _make_request(self, params: Dict) -> Optional[Dict]:
         """
         Выполняет HTTP-запрос с повторными попытками.
-        Использует urllib.request (стандартная библиотека).
 
         Args:
             params: Параметры запроса.
@@ -63,7 +54,7 @@ class CoinGeckoClient:
             RateLimitExceededError: При превышении лимита запросов.
             NetworkError: При сетевых ошибках.
         """
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(self.max_retries):
             try:
                 # Формируем URL с параметрами
                 query_string = urlencode(params)
@@ -98,22 +89,22 @@ class CoinGeckoClient:
                 if e.code == 429:
                     raise RateLimitExceededError("Превышен лимит запросов к CoinGecko API") from e
                 logger.warning(f"HTTP ошибка {e.code} при запросе к CoinGecko (попытка {attempt + 1}): {e.reason}")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY)
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
                 else:
                     raise NetworkError(f"HTTP ошибка: {e.code} {e.reason}") from e
 
             except urllib.error.URLError as e:
                 logger.warning(f"Ошибка URL при запросе к CoinGecko (попытка {attempt + 1}): {e.reason}")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY)
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
                 else:
                     raise NetworkError(f"Ошибка подключения: {e.reason}") from e
 
             except TimeoutError:
                 logger.warning(f"Таймаут при запросе к CoinGecko (попытка {attempt + 1})")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY)
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
                 else:
                     raise NetworkError("Таймаут при подключении к CoinGecko API") from None
 
@@ -122,8 +113,8 @@ class CoinGeckoClient:
 
             except Exception as e:
                 logger.error(f"Ошибка при запросе к CoinGecko: {e}")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY)
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
                 else:
                     raise NetworkError(f"Ошибка API: {str(e)}") from e
 
@@ -135,20 +126,19 @@ class CoinGeckoClient:
 
         Returns:
             Словарь с курсами криптовалют.
-            Формат: {"BTC": {"rate": 50000.0, "updated_at": "timestamp", "source": "CoinGecko"}, ...}
 
         Raises:
             ApiError: При ошибке получения данных.
         """
         try:
             # Формируем список ID криптовалют для запроса
-            crypto_ids = list(CRYPTO_CURRENCIES.values())
+            crypto_ids = [config.CRYPTO_ID_MAP[currency] for currency in config.CRYPTO_CURRENCIES]
             crypto_ids_param = ",".join(crypto_ids)
 
             # Параметры запроса
             params = {
                 "ids": crypto_ids_param,
-                "vs_currencies": "usd"
+                "vs_currencies": config.BASE_CURRENCY.lower()
             }
 
             # Выполняем запрос
@@ -160,13 +150,15 @@ class CoinGeckoClient:
             rates = {}
             now = datetime.now().isoformat()
 
-            for ticker, coin_id in CRYPTO_CURRENCIES.items():
-                if coin_id in data and "usd" in data[coin_id]:
-                    rate = data[coin_id]["usd"]
+            for ticker in config.CRYPTO_CURRENCIES:
+                coin_id = config.CRYPTO_ID_MAP[ticker]
+                if coin_id in data and config.BASE_CURRENCY.lower() in data[coin_id]:
+                    rate = data[coin_id][config.BASE_CURRENCY.lower()]
                     rates[ticker] = {
                         "rate": rate,
                         "updated_at": now,
-                        "source": "CoinGecko"
+                        "source": "CoinGecko",
+                        "raw_id": coin_id
                     }
                 else:
                     logger.warning(f"Курс для {ticker} ({coin_id}) не найден в ответе")
@@ -180,19 +172,19 @@ class CoinGeckoClient:
 
 
 class ExchangeRateClient:
-    """Клиент для работы с ExchangeRate-API (пока заглушка)."""
+    """Клиент для работы с ExchangeRate-API."""
 
     def __init__(self):
-        self.base_url = EXCHANGERATE_API_URL
-        self.api_key = EXCHANGERATE_API_KEY
-        self.is_mock_mode = self.api_key == "MOCK_KEY_FOR_NOW"
+        self.api_key = config.EXCHANGERATE_API_KEY
+        self.base_url = config.exchangerate_full_url
+        self.timeout = config.REQUEST_TIMEOUT
+        self.is_mock_mode = config.is_mock_mode
+        self.max_retries = config.MAX_RETRIES
+        self.retry_delay = config.RETRY_DELAY
 
     def get_fiat_rates(self) -> Dict[str, Dict]:
         """
         Получает курсы фиатных валют.
-
-        В режиме заглушки возвращает фиктивные данные.
-        При наличии реального ключа - делает запрос к API.
 
         Returns:
             Словарь с курсами фиатных валют.
@@ -203,60 +195,93 @@ class ExchangeRateClient:
             logger.info("Используется заглушка для ExchangeRate-API (режим разработки)")
 
             # Фиктивные курсы для разработки
-            mock_rates = {
-                "EUR": {"rate": 0.92, "updated_at": now, "source": "ExchangeRate-API (mock)"},
-                "GBP": {"rate": 0.79, "updated_at": now, "source": "ExchangeRate-API (mock)"},
-                "RUB": {"rate": 95.0, "updated_at": now, "source": "ExchangeRate-API (mock)"},
-                "JPY": {"rate": 150.0, "updated_at": now, "source": "ExchangeRate-API (mock)"},
-                "CHF": {"rate": 0.88, "updated_at": now, "source": "ExchangeRate-API (mock)"},
-            }
+            mock_rates = {}
+            for currency in config.FIAT_CURRENCIES:
+                # Простые фиктивные курсы (можно заменить на более реалистичные)
+                mock_rate = {
+                    "EUR": 0.92,
+                    "GBP": 0.79,
+                    "RUB": 95.0,
+                    "JPY": 150.0,
+                    "CHF": 0.88,
+                }.get(currency, 1.0)
+
+                mock_rates[currency] = {
+                    "rate": mock_rate,
+                    "updated_at": now,
+                    "source": "ExchangeRate-API (mock)"
+                }
 
             return mock_rates
 
         else:
-            # Реальный запрос с использованием urllib
-            logger.info("Реальный запрос к ExchangeRate-API")
+            # Реальный запрос к ExchangeRate-API
+            logger.info(f"Реальный запрос к ExchangeRate-API для {len(config.FIAT_CURRENCIES)} валют")
 
             try:
-                url = self.base_url.format(key=self.api_key)
+                for attempt in range(self.max_retries):
+                    try:
+                        req = urllib.request.Request(
+                            self.base_url,
+                            headers={
+                                'User-Agent': 'ValutaTradeHub/1.0',
+                                'Accept': 'application/json'
+                            }
+                        )
 
-                req = urllib.request.Request(
-                    url,
-                    headers={
-                        'User-Agent': 'ValutaTradeHub/1.0',
-                        'Accept': 'application/json'
-                    }
-                )
+                        response = urllib.request.urlopen(req, timeout=self.timeout)
+                        data = response.read()
+                        encoding = response.info().get_content_charset('utf-8')
+                        decoded_data = data.decode(encoding)
+                        json_data = json.loads(decoded_data)
 
-                response = urllib.request.urlopen(req, timeout=10)
-                data = response.read()
-                encoding = response.info().get_content_charset('utf-8')
-                decoded_data = data.decode(encoding)
-                json_data = json.loads(decoded_data)
+                        if json_data.get("result") != "success":
+                            error_type = json_data.get('error-type', 'Unknown error')
+                            raise ApiError(f"Ошибка ExchangeRate-API: {error_type}")
 
-                if json_data.get("result") != "success":
-                    raise ApiError(f"Ошибка ExchangeRate-API: {json_data.get('error-type', 'Unknown error')}")
+                        rates = {}
+                        for currency in config.FIAT_CURRENCIES:
+                            if currency in json_data.get("rates", {}):
+                                rates[currency] = {
+                                    "rate": json_data["rates"][currency],
+                                    "updated_at": now,
+                                    "source": "ExchangeRate-API"
+                                }
 
-                rates = {}
-                for currency in FIAT_CURRENCIES:
-                    if currency in json_data.get("rates", {}):
-                        rates[currency] = {
-                            "rate": json_data["rates"][currency],
-                            "updated_at": now,
-                            "source": "ExchangeRate-API"
-                        }
+                        logger.info(f"Получено {len(rates)} курсов фиатных валют от ExchangeRate-API")
+                        return rates
 
-                return rates
+                    except Exception as e:
+                        if attempt < self.max_retries - 1:
+                            logger.warning(f"Ошибка ExchangeRate-API (попытка {attempt + 1}): {e}")
+                            time.sleep(self.retry_delay)
+                        else:
+                            raise
 
             except Exception as e:
-                logger.error(f"Ошибка ExchangeRate-API: {e}")
+                logger.error(f"Ошибка ExchangeRate-API после {self.max_retries} попыток: {e}")
                 # В случае ошибки возвращаем заглушку
                 return self._get_fallback_rates(now)
 
     def _get_fallback_rates(self, timestamp: str) -> Dict[str, Dict]:
         """Резервные курсы на случай ошибки API."""
-        return {
-            "EUR": {"rate": 0.92, "updated_at": timestamp, "source": "ExchangeRate-API (fallback)"},
-            "GBP": {"rate": 0.79, "updated_at": timestamp, "source": "ExchangeRate-API (fallback)"},
-            "RUB": {"rate": 95.0, "updated_at": timestamp, "source": "ExchangeRate-API (fallback)"},
-        }
+        logger.warning("Используются резервные курсы ExchangeRate-API")
+
+        fallback_rates = {}
+        for currency in config.FIAT_CURRENCIES:
+            # Простые фиктивные курсы как резерв
+            fallback_rate = {
+                "EUR": 0.92,
+                "GBP": 0.79,
+                "RUB": 95.0,
+                "JPY": 150.0,
+                "CHF": 0.88,
+            }.get(currency, 1.0)
+
+            fallback_rates[currency] = {
+                "rate": fallback_rate,
+                "updated_at": timestamp,
+                "source": "ExchangeRate-API (fallback)"
+            }
+
+        return fallback_rates

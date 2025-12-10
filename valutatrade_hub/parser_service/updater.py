@@ -1,6 +1,6 @@
 """
 Основной модуль для обновления курсов валют.
-Обновлен для работы с новым форматом exchange_rates.json.
+Обновлен для работы с новой конфигурацией.
 """
 
 from datetime import datetime
@@ -8,6 +8,7 @@ from typing import Dict, Optional
 
 from ..logging_config import get_logger
 from .api_clients import CoinGeckoClient, ExchangeRateClient
+from .config import config  # <-- ИЗМЕНЕНИЕ: импортируем config
 from .storage import ExchangeRatesStorage
 
 logger = get_logger(__name__)
@@ -50,7 +51,7 @@ class RatesUpdater:
                 try:
                     record = self.storage.create_exchange_rate_record(
                         from_currency=currency,
-                        to_currency="USD",
+                        to_currency=config.BASE_CURRENCY,  # <-- ИЗМЕНЕНИЕ: используем config
                         rate=rate_info["rate"],
                         source=rate_info.get("source", "CoinGecko"),
                         meta={
@@ -83,7 +84,7 @@ class RatesUpdater:
                 try:
                     record = self.storage.create_exchange_rate_record(
                         from_currency=currency,
-                        to_currency="USD",
+                        to_currency=config.BASE_CURRENCY,  # <-- ИЗМЕНЕНИЕ: используем config
                         rate=rate_info["rate"],
                         source=rate_info.get("source", "ExchangeRate-API"),
                         meta={
@@ -107,15 +108,15 @@ class RatesUpdater:
 
             # 3. Добавляем USD как базовую валюту
             usd_record = self.storage.create_exchange_rate_record(
-                from_currency="USD",
-                to_currency="USD",
+                from_currency=config.BASE_CURRENCY,  # <-- ИЗМЕНЕНИЕ: используем config
+                to_currency=config.BASE_CURRENCY,    # <-- ИЗМЕНЕНИЕ: используем config
                 rate=1.0,
                 source="System",
                 meta={"note": "Базовая валюта"}
             )
 
             if self.storage.save_exchange_rate_record(usd_record):
-                all_rates["USD"] = {
+                all_rates[config.BASE_CURRENCY] = {  # <-- ИЗМЕНЕНИЕ: используем config
                     "rate": 1.0,
                     "timestamp": update_start.isoformat() + "Z",
                     "source": "System"

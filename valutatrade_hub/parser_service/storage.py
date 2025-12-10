@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from ..logging_config import get_logger
-from .config import EXCHANGE_RATES_FILE, RATES_CACHE_FILE
+from .config import config
 
 logger = get_logger(__name__)
 
@@ -20,8 +20,8 @@ class ExchangeRatesStorage:
     """Класс для работы с хранилищем курсов валют."""
 
     def __init__(self):
-        self.exchange_rates_file = EXCHANGE_RATES_FILE
-        self.rates_cache_file = RATES_CACHE_FILE
+        self.exchange_rates_file = config.HISTORY_FILE_PATH
+        self.rates_cache_file = config.RATES_FILE_PATH
         self._ensure_directories()
 
     def _ensure_directories(self) -> None:
@@ -237,8 +237,8 @@ class ExchangeRatesStorage:
 
             # Добавляем курсы в формате пар валют
             for currency, rate_info in rates_data.items():
-                if currency != "USD":  # Пропускаем USD, так как он базовая валюта
-                    pair_key = f"{currency}_USD"
+                if currency != config.BASE_CURRENCY:
+                    pair_key = f"{currency}_{config.BASE_CURRENCY}"
                     cache_data["pairs"][pair_key] = {
                         "rate": rate_info["rate"],
                         "updated_at": rate_info.get("timestamp", rate_info.get("updated_at", now)),
@@ -246,7 +246,8 @@ class ExchangeRatesStorage:
                     }
 
             # Также добавляем USD_USD для полноты
-            cache_data["pairs"]["USD_USD"] = {
+            usd_pair_key = f"{config.BASE_CURRENCY}_{config.BASE_CURRENCY}"
+            cache_data["pairs"][usd_pair_key] = {
                 "rate": 1.0,
                 "updated_at": now,
                 "source": "System"
