@@ -443,6 +443,289 @@ class TradingCLI(cmd.Cmd):
         except Exception as e:
             print(f"❌ Непредвиденная ошибка: {e}")
 
+    # ===== НОВЫЕ КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ PARSER SERVICE =====
+
+    def do_updaterates(self, arg: str) -> None:
+        """
+        Запустить немедленное обновление курсов валют.
+        Использование: update-rates [--source <coingecko|exchangerate>]
+        Пример: update-rates
+        Пример: update-rates --source coingecko
+        """
+        # Парсим аргументы
+        args = shlex.split(arg)
+        source = None  # По умолчанию - все источники
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--source" and i + 1 < len(args):
+                source = args[i + 1].lower()
+                if source not in ["coingecko", "exchangerate"]:
+                    print(f"❌ Ошибка: неизвестный источник '{source}'. Используйте 'coingecko' или 'exchangerate'")
+                    return
+                i += 2
+            elif args[i] and not args[i].startswith("--"):
+                # Есть аргумент, но не флаг --source
+                print("❌ Ошибка: неверный формат команды")
+                print("Использование: update-rates [--source <coingecko|exchangerate>]")
+                print("Пример: update-rates")
+                print("Пример: update-rates --source coingecko")
+                return
+            else:
+                i += 1
+
+        print("🔄 Начало обновления курсов...")
+
+        try:
+            # Инициализируем RatesUpdater
+            from ..parser_service.updater import RatesUpdater
+            updater = RatesUpdater()
+
+            if source == "coingecko":
+                print("📈 Обновление данных только от CoinGecko...")
+                # Для обновления только от одного источника нужно модифицировать логику
+                # Временно используем стандартный run_update и фильтруем логи
+                result = updater.run_update()
+                # Фильтруем результат для отображения только криптовалют
+                crypto_pairs = {k: v for k, v in result.get("pairs", {}).items()
+                              if k.split('_')[0] in ["BTC", "ETH", "LTC", "XRP", "ADA", "SOL", "DOT"]}
+                updated_count = len(crypto_pairs)
+                print(f"✅ CoinGecko: OK ({updated_count} курсов)")
+
+            elif source == "exchangerate":
+                print("💵 Обновление данных только от ExchangeRate-API...")
+                result = updater.run_update()
+                # Фильтруем результат для отображения только фиатных валют
+                fiat_currencies = ["EUR", "GBP", "RUB", "JPY", "CHF"]
+                fiat_pairs = {k: v for k, v in result.get("pairs", {}).items()
+                             if k.split('_')[0] in fiat_currencies}
+                updated_count = len(fiat_pairs)
+                print(f"✅ ExchangeRate-API: OK ({updated_count} курсов)")
+
+            else:
+                # Обновляем все источники
+                print("📈 Запрос к CoinGecko...")
+                print("💵 Запрос к ExchangeRate-API...")
+                result = updater.run_update()
+
+                # Считаем количество курсов по типам
+                pairs = result.get("pairs", {})
+                crypto_count = len([p for p in pairs.keys()
+                                  if p.split('_')[0] in ["BTC", "ETH", "LTC", "XRP", "ADA", "SOL", "DOT"]])
+                fiat_count = len([p for p in pairs.keys()
+                                if p.split('_')[0] in ["EUR", "GBP", "RUB", "JPY", "CHF"]])
+
+                if crypto_count > 0:
+                    print(f"✅ CoinGecko: OK ({crypto_count} курсов)")
+                if fiat_count > 0:
+                    print(f"✅ ExchangeRate-API: OK ({fiat_count} курсов)")
+
+                updated_count = len(pairs)
+
+            # Выводим информацию о последнем обновлении
+            last_refresh = result.get("last_refresh", "неизвестно")
+            try:
+                dt = datetime.fromisoformat(last_refresh.replace('Z', '+00:00'))
+                time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                time_str = last_refresh
+
+            print(f"💾 Запись {updated_count} курсов в data/rates.json...")
+            print(f"✅ Обновление успешно. Всего обновлено курсов: {updated_count}. Последнее обновление: {time_str}")
+
+            # Принудительно перезагружаем кеш в RateManager
+            self.rate_manager.reload_rates_cache()
+            print("🔄 Кеш RateManager перезагружен")
+
+        except ApiRequestError as e:
+            print(f"❌ Ошибка при обращении к API: {str(e)}")
+            print("ℹ️  Обновление завершено с ошибками. Проверьте logs/parser_service.log для подробностей.")
+        except Exception as e:
+            print(f"❌ Неизвестная ошибка: {e}")
+            print("ℹ️  Проверьте логи для подробностей.")
+
+    def do_showrates(self, arg: str) -> None:
+        """
+        Показать список актуальных курсов из локального кеша с возможностью фильтрации.
+        Использование: show-rates [--currency <code>] [--top <N>] [--base <currency>]
+        Пример: show-rates
+        Пример: show-rates --currency BTC
+        Пример: show-rates --top 2
+        Пример: show-rates --base EUR
+        """
+        # Парсим аргументы
+        args = shlex.split(arg)
+        currency_filter = None
+        top_n = None
+        base_currency = 'USD'  # По умолчанию
+
+        i = 0
+        while i < len(args):
+            if args[i] == "--currency" and i + 1 < len(args):
+                currency_filter = args[i + 1].upper()
+                i += 2
+            elif args[i] == "--top" and i + 1 < len(args):
+                try:
+                    top_n = int(args[i + 1])
+                    if top_n <= 0:
+                        print("❌ Ошибка: значение --top должно быть положительным числом")
+                        return
+                    i += 2
+                except ValueError:
+                    print("❌ Ошибка: --top должен быть числом")
+                    return
+            elif args[i] == "--base" and i + 1 < len(args):
+                base_currency = args[i + 1].upper()
+                i += 2
+            elif args[i].startswith("--"):
+                print(f"❌ Ошибка: неизвестный флаг '{args[i]}'")
+                print("Использование: show-rates [--currency <code>] [--top <N>] [--base <currency>]")
+                return
+            else:
+                i += 1
+
+        try:
+            # Получаем данные из кеша RateManager
+            rates_data = self.rate_manager.get_all_rates()
+
+            # Проверяем, есть ли данные
+            if not rates_data or "pairs" not in rates_data or not rates_data["pairs"]:
+                print("❌ Локальный кеш курсов пуст.")
+                print("ℹ️  Выполните 'update-rates', чтобы загрузить данные.")
+                return
+
+            pairs = rates_data["pairs"]
+            last_refresh = rates_data.get("last_refresh", "неизвестно")
+
+            # Форматируем время обновления
+            try:
+                dt = datetime.fromisoformat(last_refresh.replace('Z', '+00:00'))
+                time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                time_str = last_refresh
+
+            print(f"📊 Курсы из кеша (обновлено: {time_str}):")
+
+            # Фильтруем пары по базовой валюте
+            if base_currency != 'USD':
+                # Нужно конвертировать курсы к новой базовой валюте
+                # Для простоты показываем только USD пары и конвертируем
+                print(f"⚠️  Отображение курсов к базовой валюте {base_currency} (через USD)...")
+
+                # Находим курс базовой валюты к USD
+                base_to_usd_key = f"{base_currency}_USD"
+                if base_to_usd_key in pairs:
+                    base_rate = pairs[base_to_usd_key]["rate"]
+                    print(f"   Курс {base_currency} к USD: {base_rate}")
+                    print()
+
+                # Создаем список для сортировки
+                rate_list = []
+                for pair_key, pair_data in pairs.items():
+                    currency = pair_key.split('_')[0]
+                    to_currency = pair_key.split('_')[1]
+
+                    # Пропускаем пары, где целевая валюта не USD
+                    if to_currency != "USD":
+                        continue
+
+                    # Пропускаем саму базовую валюту
+                    if currency == base_currency:
+                        continue
+
+                    # Конвертируем курс к новой базовой валюте
+                    if currency != "USD":
+                        rate = pair_data["rate"]
+                        if base_currency == "USD":
+                            converted_rate = rate
+                        else:
+                            # Конвертируем через USD
+                            converted_rate = rate / base_rate if base_rate != 0 else 0
+
+                        rate_list.append((currency, converted_rate, pair_data.get("updated_at", "неизвестно")))
+            else:
+                # Используем USD как базовую валюту (по умолчанию)
+                rate_list = []
+                for pair_key, pair_data in pairs.items():
+                    parts = pair_key.split('_')
+                    if len(parts) == 2:
+                        currency, to_currency = parts
+                        if to_currency == "USD" and currency != "USD":
+                            rate_list.append((currency, pair_data["rate"],
+                                            pair_data.get("updated_at", "неизвестно")))
+
+            # Применяем фильтр по валюте
+            if currency_filter:
+                filtered_rates = [(c, r, t) for c, r, t in rate_list if c == currency_filter]
+                if not filtered_rates:
+                    print(f"❌ Курс для '{currency_filter}' не найден в кеше.")
+                    print("ℹ️  Проверьте правильность кода валюты или выполните 'update-rates'")
+                    return
+                rate_list = filtered_rates
+
+            # Сортируем по курсу (по убыванию для криптовалют)
+            # Разделяем крипто и фиат для правильной сортировки
+            crypto_currencies = ["BTC", "ETH", "LTC", "XRP", "ADA", "SOL", "DOT"]
+
+            crypto_rates = [(c, r, t) for c, r, t in rate_list if c in crypto_currencies]
+            fiat_rates = [(c, r, t) for c, r, t in rate_list if c not in crypto_currencies]
+
+            # Сортируем криптовалюты по курсу (убывание)
+            crypto_rates.sort(key=lambda x: x[1], reverse=True)
+
+            # Сортируем фиатные валюты по алфавиту
+            fiat_rates.sort(key=lambda x: x[0])
+
+            # Объединяем списки
+            sorted_rates = crypto_rates + fiat_rates
+
+            # Применяем фильтр --top
+            if top_n:
+                # Берем только криптовалюты для --top
+                top_crypto = crypto_rates[:top_n]
+                if top_crypto:
+                    print(f"📈 Топ-{top_n} самых дорогих криптовалют:")
+                    for currency, rate, _updated_at in top_crypto:
+                        pair_key = f"{currency}_{base_currency}"
+                        print(f"  • {pair_key}: {rate:,.2f}")
+                else:
+                    print(f"ℹ️  Нет криптовалют для отображения топ-{top_n}")
+                return
+
+            # Выводим все курсы
+            if crypto_rates:
+                print("📈 Криптовалюты:")
+                for currency, rate, updated_at in crypto_rates:
+                    pair_key = f"{currency}_{base_currency}"
+                    # Форматируем время обновления
+                    try:
+                        if 'T' in updated_at:
+                            time_part = updated_at.split('T')[1][:8]
+                            display_time = time_part
+                        else:
+                            display_time = updated_at[:8]
+                    except (IndexError, AttributeError):
+                        display_time = updated_at
+
+                    print(f"  • {pair_key}: {rate:,.2f} (обновлено: {display_time})")
+
+            if fiat_rates:
+                print("\n💵 Фиатные валюты:")
+                for currency, rate, _updated_at in fiat_rates:
+                    pair_key = f"{currency}_{base_currency}"
+                    # Для фиатных валют с малыми курсами показываем больше знаков
+                    if rate < 0.1:
+                        rate_str = f"{rate:.6f}"
+                    else:
+                        rate_str = f"{rate:.4f}"
+
+                    print(f"  • {pair_key}: {rate_str}")
+
+            print(f"\n📊 Всего курсов: {len(sorted_rates)}")
+
+        except Exception as e:
+            print(f"❌ Ошибка при получении курсов: {e}")
+
     # ===== КОМАНДЫ ДЛЯ ТЕСТИРОВАНИЯ PARSER SERVICE =====
 
     def do_parser_test(self, _: str) -> None:
@@ -593,7 +876,7 @@ class TradingCLI(cmd.Cmd):
 
     def do_exchangestats(self, _: str) -> None:
         """
-        Показать статистику по историческим данным в новом формате.
+        Показать статистику по историческим данных в новом формате.
         Команда: exchange-stats
         """
         print("📊 Статистика исторических данных (новый формат):")
@@ -793,12 +1076,12 @@ class TradingCLI(cmd.Cmd):
         except Exception as e:
             print(f"❌ Ошибка при получении списка валют: {e}")
 
-    def do_updaterates(self, _: str) -> None:
+    def do_updaterates_old(self, _: str) -> None:
         """
-        Обновить курсы валют вручную: update-rates
+        Обновить курсы валют вручную: update-rates (старая версия)
         """
         try:
-            print("🔄 Обновление курсов валют...")
+            print("🔄 Обновление курсов валют (старая версия)...")
             success, message = self.rate_manager.update_rates()
 
             if success:
@@ -882,9 +1165,12 @@ class TradingCLI(cmd.Cmd):
         # Если команда list-currencies
         elif line.startswith('list-currencies'):
             self.do_listcurrencies("")
-        # Если команда update-rates
+        # Если команда update-rates (новая)
         elif line.startswith('update-rates'):
-            self.do_updaterates("")
+            self.do_updaterates(line.replace('update-rates', '').strip())
+        # Если команда show-rates
+        elif line.startswith('show-rates'):
+            self.do_showrates(line.replace('show-rates', '').strip())
         # Если команда view-logs
         elif line.startswith('view-logs'):
             new_line = line.replace('view-logs', 'viewlogs', 1)
@@ -941,8 +1227,13 @@ class TradingCLI(cmd.Cmd):
                 ("buy", "Купить валюту", "buy --currency BTC --amount 0.05", "CurrencyNotFoundError, ApiRequestError, InvalidAmountError, InsufficientFundsError"),
                 ("sell", "Продать валюту", "sell --currency BTC --amount 0.01", "InsufficientFundsError, CurrencyNotFoundError, ApiRequestError, InvalidAmountError"),
                 ("getrate", "Получить курс валюты", "getrate --from USD --to BTC", "CurrencyNotFoundError, ApiRequestError"),
+                ("update-rates", "Обновить все курсы (новая)", "update-rates", "ApiRequestError (ошибка API)"),
+                ("update-rates --source coingecko", "Обновить только криптовалюты", "update-rates --source coingecko", "Неизвестный источник"),
+                ("show-rates", "Показать все курсы", "show-rates", "Кеш пуст"),
+                ("show-rates --currency BTC", "Курс конкретной валюты", "show-rates --currency BTC", "Валюта не найдена"),
+                ("show-rates --top 3", "Топ-3 криптовалют", "show-rates --top 3", "Нет криптовалют"),
+                ("show-rates --base EUR", "Курсы в EUR", "show-rates --base EUR", "Нет курса для базовой валюты"),
                 ("list-currencies", "Список валют", "list-currencies", "-"),
-                ("update-rates", "Обновить курсы (старое)", "update-rates", "ApiRequestError"),
                 ("update-all", "Обновить все курсы (Parser Service)", "update-all", "-"),
                 ("parser-test", "Тест Parser Service", "parser-test", "-"),
                 ("parser-status", "Статус Parser Service", "parser-status", "-"),
