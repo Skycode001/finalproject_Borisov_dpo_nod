@@ -218,30 +218,39 @@ class ExchangeRatesStorage:
 
     def update_rates_cache(self, rates_data: Dict) -> bool:
         """
-        Обновляет кеш курсов для основного сервиса.
+        Обновляет кеш курсов для основного сервиса в НОВОМ формате.
 
         Args:
             rates_data: Актуальные курсы валют в формате:
-                       {"BTC": {"rate": 50000, "source": "...", ...}, ...}
+                    {"BTC": {"rate": 50000, "source": "...", ...}, ...}
 
         Returns:
             True если обновление успешно, False в противном случае.
         """
         try:
-            # Формируем данные для кеша в формате rates.json
+            # Формируем данные для кеша в НОВОМ формате
+            now = datetime.now().isoformat() + "Z"
             cache_data = {
-                "source": "ParserService",
-                "last_refresh": datetime.now().isoformat() + "Z"
+                "pairs": {},
+                "last_refresh": now
             }
 
             # Добавляем курсы в формате пар валют
             for currency, rate_info in rates_data.items():
                 if currency != "USD":  # Пропускаем USD, так как он базовая валюта
                     pair_key = f"{currency}_USD"
-                    cache_data[pair_key] = {
+                    cache_data["pairs"][pair_key] = {
                         "rate": rate_info["rate"],
-                        "updated_at": rate_info.get("timestamp", rate_info.get("updated_at", datetime.now().isoformat()))
+                        "updated_at": rate_info.get("timestamp", rate_info.get("updated_at", now)),
+                        "source": rate_info.get("source", "Unknown")
                     }
+
+            # Также добавляем USD_USD для полноты
+            cache_data["pairs"]["USD_USD"] = {
+                "rate": 1.0,
+                "updated_at": now,
+                "source": "System"
+            }
 
             # Атомарно сохраняем кеш
             return self._atomic_write(self.rates_cache_file, cache_data)

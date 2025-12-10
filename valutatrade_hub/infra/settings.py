@@ -4,12 +4,13 @@ from typing import Any, Dict
 
 from ..logging_config import get_logger
 
+logger = get_logger(__name__)
+
 
 class SettingsLoader:
     """
     Singleton класс для загрузки конфигурации.
     """
-
     _instance = None
     _settings = None
 
@@ -22,7 +23,7 @@ class SettingsLoader:
 
     def _initialize(self) -> None:
         """Инициализирует загрузчик настроек."""
-        self.logger = get_logger(__name__)
+        self.logger = logger
         self._settings = self._load_settings()
 
     def _load_settings(self) -> Dict[str, Any]:
@@ -59,7 +60,8 @@ class SettingsLoader:
                 "supported_currencies": ["USD", "EUR", "RUB", "BTC", "ETH"]
             },
             "api": {
-                "rates_cache_duration_minutes": 5,
+                "rates_cache_duration_minutes": 5,  # TTL кеша в минутах
+                "max_cache_pairs": 100,  # Максимальное количество пар в кеше
                 "max_retries": 3,
                 "timeout_seconds": 10
             }

@@ -425,11 +425,11 @@ class TradingCLI(cmd.Cmd):
                 # Показываем обратный курс если он не бесконечный
                 if rate != 0:
                     reverse_rate = 1 / rate
-                    print(f"   🔄 Обратный курс {to_currency}→{from_currency}: {reverse_rate:.2f}")
-                # Показываем источник данных
-                print(f"   📊 Источник: {self.rate_manager._rates_data.get('source', 'локальный кеш')}")
-            else:
-                print(f"❌ {message}")
+                    # Форматируем в зависимости от величины
+                    if reverse_rate < 0.0001:
+                        print(f"   🔄 Обратный курс {to_currency}→{from_currency}: {reverse_rate:.8f}")
+                    else:
+                        print(f"   🔄 Обратный курс {to_currency}→{from_currency}: {reverse_rate:.6f}")
 
         except CurrencyNotFoundError as e:
             print(f"❌ {str(e)}")
@@ -508,6 +508,11 @@ class TradingCLI(cmd.Cmd):
 
             print(f"   • Криптовалюты: {crypto_list}")
             print(f"   • Фиатные валюты: {fiat_list}")
+
+            # Принудительно перезагружаем кеш в RateManager
+            self.rate_manager.reload_rates_cache()
+            print("   • Кеш RateManager перезагружен")
+
             print("\n💡 Теперь используйте команды:")
             print("   • getrate --from BTC --to USD  (проверить обновленный курс)")
             print("   • showportfolio                (если есть портфель)")

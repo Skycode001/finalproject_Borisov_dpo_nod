@@ -52,3 +52,10 @@ RATES_CACHE_FILE = "data/rates.json"
 # ===== ЛОГИРОВАНИЕ =====
 
 PARSER_LOG_FILE = "logs/parser_service.log"
+
+# ===== НАСТРОЙКИ КЕША =====
+# Время жизни кеша в минутах
+RATES_CACHE_TTL_MINUTES = 5
+
+# Максимальное количество пар в кеше
+MAX_CACHE_PAIRS = 100

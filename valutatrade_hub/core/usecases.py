@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..decorators import log_action
 from ..infra.settings import settings
+from ..logging_config import get_logger  # Добавляем импорт логгера
 from .currencies import get_currency
 from .exceptions import (
     ApiRequestError,
@@ -13,7 +14,10 @@ from .exceptions import (
     UserNotAuthenticatedError,
 )
 from .models import Portfolio, User
-from .utils import CurrencyService, DataManager, InputValidator
+from .utils import DataManager, InputValidator
+
+# Создаем логгер для этого модуля
+logger = get_logger(__name__)
 
 
 class UserManager:
@@ -479,7 +483,7 @@ class PortfolioManager:
 
 
 class RateManager:
-    """Менеджер для работы с курсами валют с TTL кешем."""
+    """Менеджер для работы с курсами валют с TTL кешем в новом формате."""
 
     def __init__(self):
         self._rates_data = self._load_rates()
@@ -488,29 +492,65 @@ class RateManager:
         self._CACHE_DURATION = timedelta(minutes=cache_minutes)
 
     def _load_rates(self) -> Dict:
-        """Загружает курсы из JSON-файла."""
+        """Загружает курсы из JSON файла в НОВОМ формате."""
         data_dir = settings.get("database.path", "data")
         rates_file = settings.get("database.rates_file", "rates.json")
         file_path = os.path.join(data_dir, rates_file)
 
         rates_data = DataManager.load_json(file_path)
         if not rates_data:
-            # Если файл пуст, создаем заглушку
-            try:
-                rates_data = CurrencyService.get_all_rates()
-                DataManager.save_json(file_path, rates_data)
-            except ApiRequestError:
-                # Если API недоступно, используем пустые данные
-                rates_data = {}
+            # Если файл пуст, создаем базовую структуру
+            rates_data = {
+                "pairs": {},
+                "last_refresh": None
+            }
+            DataManager.save_json(file_path, rates_data)
+
+        # Проверяем структуру файла (поддержка старого и нового форматов)
+        if "pairs" not in rates_data:
+            # Конвертируем старый формат в новый
+            converted_data = self._convert_old_format(rates_data)
+            if self._save_rates(converted_data):
+                rates_data = converted_data
+
         return rates_data
 
-    def _save_rates(self) -> bool:
+    def _convert_old_format(self, old_data: Dict) -> Dict:
+        """Конвертирует старый формат в новый."""
+        new_data = {
+            "pairs": {},
+            "last_refresh": old_data.get("last_refresh", datetime.now().isoformat() + "Z")
+        }
+
+        for key, value in old_data.items():
+            if key not in ["source", "last_refresh"]:
+                # Это пара валют в старом формате
+                new_data["pairs"][key] = {
+                    "rate": value.get("rate", 0),
+                    "updated_at": value.get("updated_at", datetime.now().isoformat() + "Z"),
+                    "source": value.get("source", old_data.get("source", "Unknown"))
+                }
+
+        return new_data
+
+    def _save_rates(self, rates_data: Dict) -> bool:
         """Сохраняет курсы в JSON-файл."""
         data_dir = settings.get("database.path", "data")
         rates_file = settings.get("database.rates_file", "rates.json")
         file_path = os.path.join(data_dir, rates_file)
 
-        return DataManager.save_json(file_path, self._rates_data)
+        return DataManager.save_json(file_path, rates_data)
+
+    def _get_rate_from_cache(self, from_currency: str, to_currency: str) -> Tuple[Optional[float], Optional[str]]:
+        """Получает курс из кеша в НОВОМ формате."""
+        pair_key = f"{from_currency}_{to_currency}"
+
+        if "pairs" in self._rates_data and pair_key in self._rates_data["pairs"]:
+            rate_data = self._rates_data["pairs"][pair_key]
+            if self._is_rate_fresh(rate_data):
+                return rate_data.get("rate"), rate_data.get("updated_at")
+
+        return None, None
 
     def _is_rate_fresh(self, rate_data: Dict) -> bool:
         """Проверяет свежесть курса по TTL из настроек."""
@@ -518,32 +558,39 @@ class RateManager:
             return False
 
         try:
-            updated_at = datetime.fromisoformat(rate_data["updated_at"])
-            return datetime.now() - updated_at < self._CACHE_DURATION
-        except (ValueError, TypeError):
+            updated_str = rate_data["updated_at"]
+            
+            # Преобразуем время из строки в datetime
+            # Удаляем 'Z' и добавляем '+00:00' для парсинга
+            if updated_str.endswith('Z'):
+                # Формат: 2025-12-10T15:53:26.123040Z
+                updated_str = updated_str[:-1]  # Удаляем 'Z'
+                if '.' in updated_str:
+                    # Есть микросекунды: 2025-12-10T15:53:26.123040
+                    updated_str = updated_str.split('.')[0]  # Убираем микросекунды
+            
+            # Парсим время
+            updated_at = datetime.fromisoformat(updated_str)
+            age = datetime.now() - updated_at
+            
+            # Проверяем, что возраст меньше TTL
+            return age < self._CACHE_DURATION
+            
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Ошибка парсинга времени {rate_data.get('updated_at')}: {e}")
             return False
-
-    def _get_rate_from_cache(self, from_currency: str, to_currency: str) -> Tuple[Optional[float], Optional[str]]:
-        """Получает курс из кеша."""
-        pair_key = f"{from_currency}_{to_currency}"
-
-        if pair_key in self._rates_data:
-            rate_data = self._rates_data[pair_key]
-            if self._is_rate_fresh(rate_data):
-                return rate_data.get("rate"), rate_data.get("updated_at")
-
-        return None, None
 
     def get_rate(self, from_currency: str, to_currency: str = 'USD') -> Tuple[bool, str, Optional[float], Optional[str]]:
         """
-        Получает курс между валютами.
+        Получает курс между валютами с учетом TTL кеша.
 
         Args:
             from_currency: Исходная валюта.
             to_currency: Целевая валюта.
 
         Returns:
-            Tuple[bool, str, Optional[float], Optional[str]]: (успех, сообщение, курс, время обновления)
+            Tuple[bool, str, Optional[float], Optional[str]]:
+            (успех, сообщение, курс, время обновления)
 
         Raises:
             CurrencyNotFoundError: Если валюта не найдена.
@@ -565,7 +612,29 @@ class RateManager:
         if rate is not None:
             return True, f"Курс {from_currency}→{to_currency}", rate, updated_at
 
-        # Если курс устарел или отсутствует, обновляем
+        # Проверяем, когда было последнее обновление всей базы
+        last_refresh = self._rates_data.get("last_refresh")
+        if last_refresh:
+            try:
+                # Парсим время последнего обновления
+                refresh_str = last_refresh
+                if refresh_str.endswith('Z'):
+                    refresh_str = refresh_str[:-1]
+                    if '.' in refresh_str:
+                        refresh_str = refresh_str.split('.')[0]
+                
+                last_refresh_time = datetime.fromisoformat(refresh_str)
+                time_since_refresh = datetime.now() - last_refresh_time
+                
+                # Если вся база свежая, но конкретной пары нет - это ошибка данных
+                if time_since_refresh < self._CACHE_DURATION:
+                    raise ApiRequestError(f"Курс {from_currency}→{to_currency} недоступен в кеше")
+                    
+            except (ValueError, TypeError):
+                pass  # Если не удалось разобрать время, продолжаем
+
+        # Если кеш устарел или пары нет, обновляем
+        logger.info(f"Кеш устарел или пара не найдена, обновление...")
         try:
             success = self.update_rates()
             if not success:
@@ -584,7 +653,7 @@ class RateManager:
 
     def get_all_rates(self) -> Dict[str, Dict[str, Any]]:
         """
-        Возвращает все доступные курсы.
+        Возвращает все доступные курсы в новом формате.
 
         Returns:
             Словарь с курсами валют.
@@ -593,7 +662,7 @@ class RateManager:
 
     def update_rates(self) -> bool:
         """
-        Обновляет курсы валют.
+        Обновляет курсы валют через Parser Service.
 
         Returns:
             bool: True если успешно, False в противном случае.
@@ -602,24 +671,73 @@ class RateManager:
             ApiRequestError: Если произошла ошибка при обновлении.
         """
         try:
-            # Безопасная операция: чтение → модификация → запись
-            old_rates = self._rates_data.copy()
+            # Используем Parser Service для обновления
+            from ..parser_service.updater import RatesUpdater
 
-            # Получаем новые курсы
-            new_rates = CurrencyService.get_all_rates()
+            updater = RatesUpdater()
+            result = updater.update_all_rates()
 
-            # Обновляем данные
-            self._rates_data.update(new_rates)
-
-            # Сохраняем
-            if self._save_rates():
-                return True
+            if result:
+                # Принудительно перезагружаем кеш из файла
+                return self.reload_rates_cache()
             else:
-                # Откат в случае ошибки сохранения
-                self._rates_data = old_rates
-                raise ApiRequestError("Ошибка сохранения курсов")
+                raise ApiRequestError("Parser Service не вернул данные")
 
-        except ApiRequestError as e:
-            raise e
+        except ImportError as e:
+            logger.error(f"Ошибка импорта Parser Service: {e}")
+            raise ApiRequestError("Parser Service недоступен") from e
         except Exception as e:
-            raise ApiRequestError(f"Неожиданная ошибка: {str(e)}") from e
+            logger.error(f"Ошибка обновления курсов: {e}")
+            raise ApiRequestError(f"Ошибка обновления: {str(e)}") from e
+
+    def reload_rates_cache(self) -> bool:
+        """
+        Принудительно перезагружает кеш курсов из файла.
+
+        Returns:
+            bool: True если успешно перезагружено, False в противном случае.
+        """
+        try:
+            old_data = self._rates_data
+            self._rates_data = self._load_rates()
+
+            old_count = len(old_data.get("pairs", {}))
+            new_count = len(self._rates_data.get("pairs", {}))
+
+            logger.info(f"Кеш курсов перезагружен. Пар было: {old_count}, стало: {new_count}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка перезагрузки кеша курсов: {e}")
+            return False
+
+    def get_cache_info(self) -> Dict[str, Any]:
+        """
+        Возвращает информацию о состоянии кеша.
+
+        Returns:
+            Словарь с информацией о кеше.
+        """
+        pairs_count = len(self._rates_data.get("pairs", {}))
+        last_refresh = self._rates_data.get("last_refresh")
+
+        try:
+            if last_refresh:
+                last_refresh_str = last_refresh.replace('Z', '+00:00')
+                last_refresh_time = datetime.fromisoformat(last_refresh_str)
+                is_fresh = datetime.now() - last_refresh_time < self._CACHE_DURATION
+                time_ago = str(datetime.now() - last_refresh_time)
+            else:
+                is_fresh = False
+                time_ago = "never"
+        except (ValueError, TypeError):
+            is_fresh = False
+            time_ago = "invalid"
+
+        return {
+            "pairs_count": pairs_count,
+            "last_refresh": last_refresh,
+            "is_fresh": is_fresh,
+            "time_since_last_refresh": time_ago,
+            "cache_duration_minutes": self._CACHE_DURATION.total_seconds() / 60,
+            "available_pairs": list(self._rates_data.get("pairs", {}).keys())
+        }
