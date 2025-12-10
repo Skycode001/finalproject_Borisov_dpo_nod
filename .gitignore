@@ -63,3 +63,6 @@ data/rates.json.corrupted*
 # Файлы пользователей и портфелей (для разработки можно коммитить тестовые)
 # data/users.json
 # data/portfolios.json
+
+# ruff
+.ruff_cache/
