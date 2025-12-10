@@ -1162,15 +1162,15 @@ class TradingCLI(cmd.Cmd):
         elif line.startswith('get-rate'):
             new_line = line.replace('get-rate', 'getrate', 1)
             self.onecmd(new_line)
+        # Если команда update-rates (новая команда)
+        elif line.startswith('update-rates'):
+            self.do_updaterates(line.replace('update-rates', '', 1).strip())
+        # Если команда show-rates (новая команда)
+        elif line.startswith('show-rates'):
+            self.do_showrates(line.replace('show-rates', '', 1).strip())
         # Если команда list-currencies
         elif line.startswith('list-currencies'):
             self.do_listcurrencies("")
-        # Если команда update-rates (новая)
-        elif line.startswith('update-rates'):
-            self.do_updaterates(line.replace('update-rates', '').strip())
-        # Если команда show-rates
-        elif line.startswith('show-rates'):
-            self.do_showrates(line.replace('show-rates', '').strip())
         # Если команда view-logs
         elif line.startswith('view-logs'):
             new_line = line.replace('view-logs', 'viewlogs', 1)
@@ -1218,29 +1218,43 @@ class TradingCLI(cmd.Cmd):
             commands_table.align["Возможные ошибки"] = "l"
 
             commands = [
+                # Основные команды пользователя
                 ("register", "Регистрация нового пользователя", "register --username alice --password 1234", "Username занят, пароль короткий"),
                 ("login", "Вход в систему", "login --username alice --password 1234", "Пользователь не найден, неверный пароль"),
                 ("logout", "Выход из системы", "logout", "-"),
                 ("whoami", "Инфо о текущем пользователе", "whoami", "-"),
-                ("showportfolio", "Показать портфель", "showportfolio", "Требуется авторизация"),
+
+                # Работа с портфелем
+                ("showportfolio", "Показать портфель в USD", "showportfolio", "Требуется авторизация"),
                 ("showportfolio --base EUR", "Портфель в EUR", "showportfolio --base EUR", "Неизвестная базовая валюта"),
-                ("buy", "Купить валюту", "buy --currency BTC --amount 0.05", "CurrencyNotFoundError, ApiRequestError, InvalidAmountError, InsufficientFundsError"),
-                ("sell", "Продать валюту", "sell --currency BTC --amount 0.01", "InsufficientFundsError, CurrencyNotFoundError, ApiRequestError, InvalidAmountError"),
-                ("getrate", "Получить курс валюты", "getrate --from USD --to BTC", "CurrencyNotFoundError, ApiRequestError"),
-                ("update-rates", "Обновить все курсы (новая)", "update-rates", "ApiRequestError (ошибка API)"),
+                ("buy", "Купить валюту", "buy --currency BTC --amount 0.05", "Недостаточно средств, неизвестная валюта, неверная сумма"),
+                ("sell", "Продать валюту", "sell --currency BTC --amount 0.01", "Недостаточно средств, валюта не найдена, неверная сумма"),
+
+                # Курсы валют (старые команды)
+                ("getrate", "Получить курс между валютами", "getrate --from USD --to BTC", "Валюта не найдена, ошибка API"),
+                ("list-currencies", "Список поддерживаемых валют", "list-currencies", "-"),
+
+                # Курсы валют (новые команды)
+                ("update-rates", "Обновить все курсы", "update-rates", "Ошибка API"),
                 ("update-rates --source coingecko", "Обновить только криптовалюты", "update-rates --source coingecko", "Неизвестный источник"),
-                ("show-rates", "Показать все курсы", "show-rates", "Кеш пуст"),
-                ("show-rates --currency BTC", "Курс конкретной валюты", "show-rates --currency BTC", "Валюта не найдена"),
-                ("show-rates --top 3", "Топ-3 криптовалют", "show-rates --top 3", "Нет криптовалют"),
+                ("update-rates --source exchangerate", "Обновить только фиатные валюты", "update-rates --source exchangerate", "Неизвестный источник"),
+                ("show-rates", "Показать все курсы из кеша", "show-rates", "Кеш пуст"),
+                ("show-rates --currency BTC", "Курс конкретной валюты", "show-rates --currency BTC", "Валюта не найдена в кеше"),
+                ("show-rates --top 3", "Топ-3 криптовалют", "show-rates --top 3", "Нет криптовалют в кеше"),
                 ("show-rates --base EUR", "Курсы в EUR", "show-rates --base EUR", "Нет курса для базовой валюты"),
-                ("list-currencies", "Список валют", "list-currencies", "-"),
-                ("update-all", "Обновить все курсы (Parser Service)", "update-all", "-"),
+
+                # Parser Service
+                ("update-all", "Обновить все курсы (старая команда)", "update-all", "-"),
                 ("parser-test", "Тест Parser Service", "parser-test", "-"),
                 ("parser-status", "Статус Parser Service", "parser-status", "-"),
                 ("exchange-stats", "Статистика исторических данных", "exchange-stats", "-"),
                 ("view-history", "История курса валюты", "view-history --currency BTC --limit 5", "-"),
                 ("cleanup-history", "Очистка старых записей", "cleanup-history --days 30", "-"),
-                ("view-logs", "Просмотр логов", "view-logs --lines 10", "-"),
+
+                # Логи и отладка
+                ("view-logs", "Просмотр логов", "view-logs --lines 10", "Файл логов не найден"),
+
+                # Выход
                 ("exit/quit", "Выход из приложения", "exit", "-"),
                 ("help", "Показать эту справку", "help", "-"),
             ]
@@ -1251,19 +1265,19 @@ class TradingCLI(cmd.Cmd):
             print(commands_table)
 
             print("\n🛑 Описание ошибок:")
+            print("  • InsufficientFundsError - недостаточно средств для операции")
             print("  • CurrencyNotFoundError - неизвестная валюта (используйте list-currencies)")
-            print("  • InsufficientFundsError - недостаточно средств")
-            print("  • ApiRequestError - ошибка внешнего API")
-            print("  • InvalidAmountError - некорректная сумма")
+            print("  • ApiRequestError - ошибка при обращении к внешнему API")
+            print("  • InvalidAmountError - некорректная сумма (должна быть > 0)")
             print("  • UserNotAuthenticatedError - требуется авторизация")
+
             print("\n💡 Подсказки:")
             print("  • Используйте list-currencies для просмотра доступных валют")
             print("  • При ошибке ApiRequestError проверьте подключение к сети")
             print("  • Логи операций сохраняются в папке logs/")
-            print("  • Parser Service использует CoinGecko API для криптовалют")
-            print("  • Для фиатных валют используется заглушка (пока)")
-            print("  • Новый формат exchange_rates.json хранит историю с уникальными ID")
-            print("  • Используйте cleanup-history для удаления старых записей")
+            print("  • update-rates обновляет курсы через Parser Service")
+            print("  • show-rates показывает курсы из локального кеша")
+            print("  • Для реальных фиатных курсов нужен ключ ExchangeRate-API")
 
 
 def run_cli() -> None:
