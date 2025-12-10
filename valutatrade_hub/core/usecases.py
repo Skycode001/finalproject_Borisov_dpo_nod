@@ -559,7 +559,7 @@ class RateManager:
 
         try:
             updated_str = rate_data["updated_at"]
-            
+
             # Преобразуем время из строки в datetime
             # Удаляем 'Z' и добавляем '+00:00' для парсинга
             if updated_str.endswith('Z'):
@@ -568,14 +568,14 @@ class RateManager:
                 if '.' in updated_str:
                     # Есть микросекунды: 2025-12-10T15:53:26.123040
                     updated_str = updated_str.split('.')[0]  # Убираем микросекунды
-            
+
             # Парсим время
             updated_at = datetime.fromisoformat(updated_str)
             age = datetime.now() - updated_at
-            
+
             # Проверяем, что возраст меньше TTL
             return age < self._CACHE_DURATION
-            
+
         except (ValueError, TypeError) as e:
             logger.warning(f"Ошибка парсинга времени {rate_data.get('updated_at')}: {e}")
             return False
@@ -622,19 +622,19 @@ class RateManager:
                     refresh_str = refresh_str[:-1]
                     if '.' in refresh_str:
                         refresh_str = refresh_str.split('.')[0]
-                
+
                 last_refresh_time = datetime.fromisoformat(refresh_str)
                 time_since_refresh = datetime.now() - last_refresh_time
-                
+
                 # Если вся база свежая, но конкретной пары нет - это ошибка данных
                 if time_since_refresh < self._CACHE_DURATION:
                     raise ApiRequestError(f"Курс {from_currency}→{to_currency} недоступен в кеше")
-                    
+
             except (ValueError, TypeError):
                 pass  # Если не удалось разобрать время, продолжаем
 
         # Если кеш устарел или пары нет, обновляем
-        logger.info(f"Кеш устарел или пара не найдена, обновление...")
+        logger.info("Кеш устарел или пара не найдена, обновление...")
         try:
             success = self.update_rates()
             if not success:
