@@ -495,19 +495,26 @@ class TradingCLI(cmd.Cmd):
             from ..parser_service.updater import RatesUpdater
 
             updater = RatesUpdater()
-            result = updater.update_all_rates()
+            # ИСПРАВЛЕНИЕ: используем новый метод run_update() вместо update_all_rates()
+            result = updater.run_update()
 
             print("✅ Обновление завершено!")
-            print(f"   • Обновлено валют: {len(result)}")
+            print(f"   • Обновлено пар курсов: {len(result.get('pairs', {}))}")
+
             # Фильтруем криптовалюты и фиатные
-            crypto_currencies = ['BTC', 'ETH', 'LTC', 'XRP', 'ADA', 'SOL', 'DOT']
-            fiat_currencies = ['USD', 'EUR', 'GBP', 'RUB', 'JPY', 'CHF']
+            pairs = result.get('pairs', {})
+            crypto_currencies = []
+            fiat_currencies = []
 
-            crypto_list = [c for c in result.keys() if c in crypto_currencies]
-            fiat_list = [c for c in result.keys() if c in fiat_currencies]
+            for pair_key in pairs.keys():
+                currency = pair_key.split('_')[0]
+                if currency in ['BTC', 'ETH', 'LTC', 'XRP', 'ADA', 'SOL', 'DOT']:
+                    crypto_currencies.append(currency)
+                elif currency not in ['USD']:
+                    fiat_currencies.append(currency)
 
-            print(f"   • Криптовалюты: {crypto_list}")
-            print(f"   • Фиатные валюты: {fiat_list}")
+            print(f"   • Криптовалюты: {sorted(set(crypto_currencies))}")
+            print(f"   • Фиатные валюты: {sorted(set(fiat_currencies))}")
 
             # Принудительно перезагружаем кеш в RateManager
             self.rate_manager.reload_rates_cache()

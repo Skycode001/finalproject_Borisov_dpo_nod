@@ -675,13 +675,15 @@ class RateManager:
             from ..parser_service.updater import RatesUpdater
 
             updater = RatesUpdater()
-            result = updater.update_all_rates()
+            # ИСПРАВЛЕНИЕ: используем новый метод run_update() вместо update_all_rates()
+            result = updater.run_update()
 
-            if result:
+            # ИСПРАВЛЕНИЕ: проверяем наличие поля 'pairs' в новом формате
+            if result and 'pairs' in result:
                 # Принудительно перезагружаем кеш из файла
                 return self.reload_rates_cache()
             else:
-                raise ApiRequestError("Parser Service не вернул данные")
+                raise ApiRequestError("Parser Service не вернул корректные данные")
 
         except ImportError as e:
             logger.error(f"Ошибка импорта Parser Service: {e}")
