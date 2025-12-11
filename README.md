@@ -80,7 +80,8 @@ show-rates --currency BTC
 show-rates --base EUR
 ```
 
-# Пример выполнения команд проекта (часть 1)
+### Пример выполнения команд проекта (часть 1)
+
 [![asciicast](https://asciinema.org/a/M5lZrhgeIuj8aGkv9wobJVGFZ.svg)](https://asciinema.org/a/M5lZrhgeIuj8aGkv9wobJVGFZ)
 
 ### Управление Parser Service
@@ -120,6 +121,10 @@ view-logs --lines 10
 # Список поддерживаемых валют
 list-currencies
 ```
+
+### Пример выполнения команд проекта (часть 2)
+
+[![asciicast](https://asciinema.org/a/GIsR7FeNBLPeX7H3JXSqCQT6S.svg)](https://asciinema.org/a/GIsR7FeNBLPeX7H3JXSqCQT6S)
 
 ## 🔧 Конфигурация
 
